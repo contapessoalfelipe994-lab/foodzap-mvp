@@ -328,7 +328,7 @@ const PublicStore: React.FC = () => {
     return parts.join(', ');
   };
 
-  const handleFinalizeOrder = () => {
+  const handleFinalizeOrder = async () => {
     try {
       if (!store || !store.id) {
         alert('Erro: Loja não encontrada. Por favor, recarregue a página.');
@@ -403,7 +403,8 @@ const PublicStore: React.FC = () => {
             }
             return c;
           });
-          db.saveCustomers(updatedCustomers);
+          // Salva atualização do cliente localmente (não sincroniza no SheetDB para evitar duplicatas)
+          await db.saveCustomers(updatedCustomers, true);
           
           // Atualiza o cliente atual
           const updatedCustomer = {
@@ -413,6 +414,7 @@ const PublicStore: React.FC = () => {
           };
           db.setCurrentCustomer(updatedCustomer);
           setCurrentCustomer(updatedCustomer);
+          console.log('✅ Endereço e preferências salvos com sucesso');
         } catch (error) {
           console.error('Erro ao salvar endereço do cliente:', error);
         }
@@ -456,36 +458,6 @@ const PublicStore: React.FC = () => {
     }
     
     message += `\n*TOTAL: R$ ${total.toFixed(2)}*`;
-
-      // Salva endereço e preferências do cliente se solicitado
-      if (saveAddress && currentCustomer) {
-        try {
-          const customers = db.getCustomers();
-          const updatedCustomers = customers.map(c => {
-            if (c.id === currentCustomer.id) {
-              return {
-                ...c,
-                savedAddress: deliveryType === 'delivery' && fullAddress ? addressData : undefined,
-                preferredDeliveryType: deliveryType
-              };
-            }
-            return c;
-          });
-          db.saveCustomers(updatedCustomers);
-          
-          // Atualiza o cliente atual
-          const updatedCustomer = {
-            ...currentCustomer,
-            savedAddress: deliveryType === 'delivery' && fullAddress ? addressData : undefined,
-            preferredDeliveryType: deliveryType
-          };
-          db.setCurrentCustomer(updatedCustomer);
-          setCurrentCustomer(updatedCustomer);
-          console.log('✅ Endereço e preferências salvos com sucesso');
-        } catch (error) {
-          console.error('Erro ao salvar endereço do cliente:', error);
-        }
-      }
 
       // Codifica a mensagem corretamente para WhatsApp
       const encodedMessage = encodeURIComponent(message);

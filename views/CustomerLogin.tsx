@@ -13,7 +13,7 @@ const CustomerLogin: React.FC = () => {
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -28,9 +28,29 @@ const CustomerLogin: React.FC = () => {
         return;
       }
 
-      const customers = db.getCustomers();
+      // Primeiro busca no localStorage
+      let customers = db.getCustomers();
       const normalizedEmail = email.toLowerCase().trim();
-      const customer = customers.find(c => c.email?.toLowerCase().trim() === normalizedEmail);
+      let customer = customers.find(c => c.email?.toLowerCase().trim() === normalizedEmail);
+
+      // Se não encontrou no localStorage, busca no Sheets
+      if (!customer) {
+        try {
+          console.log('🔍 Cliente não encontrado localmente, buscando no Sheets...');
+          // Sincroniza dados do Sheets
+          await db.syncFromSheetDB();
+          // Busca novamente após sincronizar
+          customers = db.getCustomers();
+          customer = customers.find(c => c.email?.toLowerCase().trim() === normalizedEmail);
+          
+          if (customer) {
+            console.log('✅ Cliente encontrado no Sheets!');
+          }
+        } catch (syncError) {
+          console.warn('Erro ao sincronizar do Sheets:', syncError);
+          // Continua mesmo se falhar a sincronização
+        }
+      }
 
       if (customer && customer.password === password.trim()) {
         db.setCurrentCustomer(customer);
@@ -46,7 +66,7 @@ const CustomerLogin: React.FC = () => {
           setError('Código da loja não encontrado. Entre em contato com o suporte.');
         }
       } else {
-        setError('Credenciais inválidas. Tente novamente ou crie uma conta.');
+        setError('E-mail não encontrado. Verifique o e-mail ou crie uma conta.');
       }
     } catch (error) {
       console.error('Erro ao fazer login:', error);

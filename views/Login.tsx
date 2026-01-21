@@ -155,7 +155,7 @@ const Login: React.FC = () => {
             <div>
               <label className="block text-xs font-black uppercase text-slate-400 tracking-widest mb-2 px-1">E-mail</label>
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} className="sm:w-5 sm:h-5" />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 sm:w-5 sm:h-5" size={18} />
                 <input
                   type="email"
                   required
@@ -170,7 +170,7 @@ const Login: React.FC = () => {
             <div>
               <label className="block text-xs font-black uppercase text-slate-400 tracking-widest mb-2 px-1">Senha</label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} className="sm:w-5 sm:h-5" />
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 sm:w-5 sm:h-5" size={18} />
                 <input
                   type="password"
                   required

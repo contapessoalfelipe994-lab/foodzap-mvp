@@ -15,7 +15,7 @@ const CustomerRegister: React.FC = () => {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -67,7 +67,8 @@ const CustomerRegister: React.FC = () => {
         storeId: store.id
       };
 
-      db.saveCustomers([...customers, newCustomer]);
+      // Salva o cliente (a função já verifica duplicatas no SheetDB)
+      await db.saveCustomers([...customers, newCustomer]);
       db.setCurrentCustomer(newCustomer);
       navigate(`/loja/${store.code}`);
     } catch (error) {

@@ -41,18 +41,85 @@ const saveToStorage = <T,>(key: string, data: T) => {
   }
 };
 
+// Função para verificar se um registro já existe no SheetDB
+// Para clientes, verifica por email dentro do campo JSON 'data'
+const checkRecordExists = async (table: string, identifier: string, identifierField: string = 'record_id'): Promise<boolean> => {
+  try {
+    // Busca todos os registros da tabela
+    const response = await fetch(`${SHEETDB_API}?table_type=${table}`);
+    if (!response.ok) {
+      return false;
+    }
+    
+    const allRecords = await response.json();
+    if (!Array.isArray(allRecords) || allRecords.length === 0) {
+      return false;
+    }
+    
+    // Para clientes, verifica o email dentro do campo 'data' (JSON)
+    if (table === 'customers' && identifierField === 'email') {
+      const normalizedIdentifier = identifier.toLowerCase().trim();
+      return allRecords.some((record: any) => {
+        try {
+          if (record.data) {
+            const data = JSON.parse(record.data);
+            return data.email?.toLowerCase().trim() === normalizedIdentifier;
+          }
+        } catch {
+          // Ignora erros de parsing
+        }
+        return false;
+      });
+    }
+    
+    // Para outros casos, verifica por record_id
+    return allRecords.some((record: any) => {
+      return record.record_id === identifier || record.id === identifier;
+    });
+  } catch (error) {
+    return false; // Se falhar, assume que não existe para não bloquear
+  }
+};
+
 // Funções para sincronizar com SheetDB
 // SheetDB funciona como API REST - envia dados como linhas do Google Sheets
+// Agora verifica duplicatas antes de salvar
 const syncToSheetDB = async (table: string, data: any[]) => {
   try {
-    // Para cada item, envia como uma linha no SheetDB
-    // SheetDB espera um objeto com campos que correspondem às colunas do sheet
+    let savedCount = 0;
+    let skippedCount = 0;
+    
+    // Para cada item, verifica se já existe antes de salvar
     for (const item of data) {
       try {
+        // Identificador único baseado no tipo de tabela
+        let identifier: string;
+        let identifierField: string = 'record_id';
+        
+        if (table === 'customers' && item.email) {
+          // Para clientes, usa email como identificador
+          identifier = item.email.toLowerCase().trim();
+          identifierField = 'email';
+        } else if (item.id) {
+          // Para outros, usa ID
+          identifier = item.id;
+        } else {
+          // Se não tiver ID, gera um
+          identifier = Math.random().toString(36).substr(2, 9);
+        }
+        
+        // Verifica se já existe
+        const exists = await checkRecordExists(table, identifier, identifierField);
+        
+        if (exists) {
+          skippedCount++;
+          continue; // Pula se já existe
+        }
+        
         // Cria registro para o SheetDB com todos os dados serializados
         const record: any = {
           table_type: table,
-          record_id: item.id || Math.random().toString(36).substr(2, 9),
+          record_id: item.id || identifier,
           data: JSON.stringify(item),
           updated_at: new Date().toISOString()
         };
@@ -64,27 +131,39 @@ const syncToSheetDB = async (table: string, data: any[]) => {
           },
           body: JSON.stringify(record)
         });
+        
+        savedCount++;
       } catch (err) {
         // Continua mesmo se algum registro falhar - não bloqueia a aplicação
+        console.warn(`Erro ao salvar item no SheetDB (${table}):`, err);
       }
     }
     
-    console.log(`✅ ${data.length} registros sincronizados com SheetDB (${table})`);
+    if (savedCount > 0 || skippedCount > 0) {
+      console.log(`✅ SheetDB (${table}): ${savedCount} novos registros salvos, ${skippedCount} duplicados ignorados`);
+    }
   } catch (error) {
     // Silenciosamente falha - mantém funcionamento local sempre
     // Não mostra erro ao usuário para não interromper o uso
+    console.warn(`Erro ao sincronizar ${table} com SheetDB:`, error);
   }
 };
 
 const getFromSheetDB = async <T,>(table: string, defaultValue: T): Promise<T> => {
   try {
     // Busca dados do SheetDB - pode filtrar por campo se necessário
-    const response = await fetch(`${SHEETDB_API}?table_type=${table}`);
+    const url = `${SHEETDB_API}?table_type=${table}`;
+    console.log(`🔍 Buscando dados do Sheets (${table}):`, url);
+    
+    const response = await fetch(url);
     if (!response.ok) {
+      console.warn(`⚠️ Resposta do Sheets não OK (${table}):`, response.status, response.statusText);
       return defaultValue;
     }
     
     const data = await response.json();
+    console.log(`📦 Dados brutos recebidos do Sheets (${table}):`, data);
+    
     if (Array.isArray(data) && data.length > 0) {
       // Converte dados do SheetDB de volta para o formato esperado
       const parsed = data
@@ -92,19 +171,28 @@ const getFromSheetDB = async <T,>(table: string, defaultValue: T): Promise<T> =>
           try {
             // Tenta parsear do campo 'data' ou usa o objeto diretamente
             if (item.data) {
-              return JSON.parse(item.data);
+              const parsedData = JSON.parse(item.data);
+              console.log(`✅ Item parseado (${table}):`, parsedData);
+              return parsedData;
             }
+            // Se não tiver campo 'data', tenta usar o item diretamente
+            console.log(`📋 Item sem campo 'data' (${table}):`, item);
             return item;
-          } catch {
+          } catch (parseError) {
+            console.warn(`⚠️ Erro ao parsear item (${table}):`, parseError, item);
             return null;
           }
         })
         .filter((item: any) => item !== null);
       
+      console.log(`✅ ${parsed.length} item(s) parseado(s) com sucesso (${table})`);
       return parsed as T;
     }
+    
+    console.log(`ℹ️ Nenhum dado encontrado no Sheets (${table})`);
     return defaultValue;
   } catch (error) {
+    console.error(`❌ Erro ao buscar dados do Sheets (${table}):`, error);
     // Se falhar, retorna o valor padrão (dados locais)
     return defaultValue;
   }
@@ -345,24 +433,85 @@ export const db = {
         getFromSheetDB<Customer[]>('customers', [])
       ]);
 
-      // Se encontrar dados no SheetDB, mescla com local (SheetDB tem prioridade)
-      if (sheetStores.length > 0) {
-        saveToStorage(STORAGE_KEYS.STORES, sheetStores);
-      }
-      if (sheetUsers.length > 0) {
-        saveToStorage(STORAGE_KEYS.USERS, sheetUsers);
-      }
-      if (sheetProducts.length > 0) {
-        saveToStorage(STORAGE_KEYS.PRODUCTS, sheetProducts);
-      }
-      if (sheetOrders.length > 0) {
-        saveToStorage(STORAGE_KEYS.ORDERS, sheetOrders);
-      }
+      // Mescla dados do Sheets com dados locais (evita duplicatas)
+      // Para clientes, mescla por email
       if (sheetCustomers.length > 0) {
-        saveToStorage(STORAGE_KEYS.CUSTOMERS, sheetCustomers);
+        const localCustomers = getFromStorage<Customer[]>(STORAGE_KEYS.CUSTOMERS, []);
+        const localEmails = new Set(localCustomers.map(c => c.email?.toLowerCase().trim()).filter(Boolean));
+        
+        // Adiciona apenas clientes do Sheets que não existem localmente
+        const newCustomers = sheetCustomers.filter(c => {
+          const email = c.email?.toLowerCase().trim();
+          return email && !localEmails.has(email);
+        });
+        
+        if (newCustomers.length > 0) {
+          const mergedCustomers = [...localCustomers, ...newCustomers];
+          saveToStorage(STORAGE_KEYS.CUSTOMERS, mergedCustomers);
+          console.log(`✅ ${newCustomers.length} cliente(s) sincronizado(s) do Sheets`);
+        }
       }
 
-      console.log('📊 SheetDB conectado - dados sincronizados');
+      // Para lojas, mescla por ID
+      if (sheetStores.length > 0) {
+        const localStores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+        const localStoreIds = new Set(localStores.map(s => s.id).filter(Boolean));
+        
+        const newStores = sheetStores.filter(s => s.id && !localStoreIds.has(s.id));
+        
+        if (newStores.length > 0) {
+          const mergedStores = [...localStores, ...newStores];
+          saveToStorage(STORAGE_KEYS.STORES, mergedStores);
+          console.log(`✅ ${newStores.length} loja(s) sincronizada(s) do Sheets`);
+        }
+      }
+
+      // Para usuários, mescla por email
+      if (sheetUsers.length > 0) {
+        const localUsers = getFromStorage<User[]>(STORAGE_KEYS.USERS, []);
+        const localUserEmails = new Set(localUsers.map(u => u.email?.toLowerCase().trim()).filter(Boolean));
+        
+        const newUsers = sheetUsers.filter(u => {
+          const email = u.email?.toLowerCase().trim();
+          return email && !localUserEmails.has(email);
+        });
+        
+        if (newUsers.length > 0) {
+          const mergedUsers = [...localUsers, ...newUsers];
+          saveToStorage(STORAGE_KEYS.USERS, mergedUsers);
+          console.log(`✅ ${newUsers.length} usuário(s) sincronizado(s) do Sheets`);
+        }
+      }
+
+      // Para produtos, mescla por ID
+      if (sheetProducts.length > 0) {
+        const localProducts = getFromStorage<Product[]>(STORAGE_KEYS.PRODUCTS, []);
+        const localProductIds = new Set(localProducts.map(p => p.id).filter(Boolean));
+        
+        const newProducts = sheetProducts.filter(p => p.id && !localProductIds.has(p.id));
+        
+        if (newProducts.length > 0) {
+          const mergedProducts = [...localProducts, ...newProducts];
+          saveToStorage(STORAGE_KEYS.PRODUCTS, mergedProducts);
+          console.log(`✅ ${newProducts.length} produto(s) sincronizado(s) do Sheets`);
+        }
+      }
+
+      // Para pedidos, mescla por ID
+      if (sheetOrders.length > 0) {
+        const localOrders = getFromStorage<Order[]>(STORAGE_KEYS.ORDERS, []);
+        const localOrderIds = new Set(localOrders.map(o => o.id).filter(Boolean));
+        
+        const newOrders = sheetOrders.filter(o => o.id && !localOrderIds.has(o.id));
+        
+        if (newOrders.length > 0) {
+          const mergedOrders = [...localOrders, ...newOrders];
+          saveToStorage(STORAGE_KEYS.ORDERS, mergedOrders);
+          console.log(`✅ ${newOrders.length} pedido(s) sincronizado(s) do Sheets`);
+        }
+      }
+
+      console.log('📊 Sincronização do SheetDB concluída');
     } catch (error) {
       console.warn('SheetDB sync error:', error);
       // Continua funcionando localmente mesmo se falhar
@@ -441,17 +590,39 @@ export const db = {
   },
   
   getProducts: () => getFromStorage<Product[]>(STORAGE_KEYS.PRODUCTS, []),
-  saveProducts: (products: Product[]) => {
+  saveProducts: async (products: Product[]) => {
     saveToStorage(STORAGE_KEYS.PRODUCTS, products);
-    // Sincroniza com SheetDB em background (não bloqueia)
-    syncToSheetDB('products', products).catch(() => {});
+    // Sincroniza apenas produtos novos com SheetDB (verifica duplicatas por ID)
+    try {
+      const existingSheetProducts = await getFromSheetDB<Product[]>('products', []);
+      const existingIds = new Set(existingSheetProducts.map(p => p.id).filter(Boolean));
+      
+      const newProducts = products.filter(p => p.id && !existingIds.has(p.id));
+      
+      if (newProducts.length > 0) {
+        await syncToSheetDB('products', newProducts);
+      }
+    } catch (error) {
+      console.warn('Erro ao verificar duplicatas de produtos no SheetDB:', error);
+    }
   },
   
   getOrders: () => getFromStorage<Order[]>(STORAGE_KEYS.ORDERS, []),
-  saveOrders: (orders: Order[]) => {
+  saveOrders: async (orders: Order[]) => {
     saveToStorage(STORAGE_KEYS.ORDERS, orders);
-    // Sincroniza com SheetDB em background (não bloqueia)
-    syncToSheetDB('orders', orders).catch(() => {});
+    // Sincroniza apenas pedidos novos com SheetDB (verifica duplicatas por ID)
+    try {
+      const existingSheetOrders = await getFromSheetDB<Order[]>('orders', []);
+      const existingIds = new Set(existingSheetOrders.map(o => o.id).filter(Boolean));
+      
+      const newOrders = orders.filter(o => o.id && !existingIds.has(o.id));
+      
+      if (newOrders.length > 0) {
+        await syncToSheetDB('orders', newOrders);
+      }
+    } catch (error) {
+      console.warn('Erro ao verificar duplicatas de pedidos no SheetDB:', error);
+    }
   },
 
   getCurrentUser: () => getFromStorage<User | null>(STORAGE_KEYS.CURRENT_USER, null),
@@ -459,10 +630,35 @@ export const db = {
 
   // Clientes
   getCustomers: () => getFromStorage<Customer[]>(STORAGE_KEYS.CUSTOMERS, []),
-  saveCustomers: (customers: Customer[]) => {
+  saveCustomers: async (customers: Customer[], skipSheetSync: boolean = false) => {
     saveToStorage(STORAGE_KEYS.CUSTOMERS, customers);
-    // Sincroniza com SheetDB em background (não bloqueia)
-    syncToSheetDB('customers', customers).catch(() => {});
+    
+    // Se skipSheetSync for true, não sincroniza (útil para atualizações de clientes existentes)
+    if (skipSheetSync) {
+      return;
+    }
+    
+    // Sincroniza apenas clientes novos com SheetDB (verifica duplicatas por email)
+    try {
+      // Busca clientes existentes no SheetDB
+      const existingSheetCustomers = await getFromSheetDB<Customer[]>('customers', []);
+      const existingEmails = new Set(existingSheetCustomers.map(c => c.email?.toLowerCase().trim()).filter(Boolean));
+      
+      // Filtra apenas clientes novos (que não existem no SheetDB)
+      const newCustomers = customers.filter(c => {
+        const email = c.email?.toLowerCase().trim();
+        return email && !existingEmails.has(email);
+      });
+      
+      if (newCustomers.length > 0) {
+        // Sincroniza apenas os novos clientes
+        await syncToSheetDB('customers', newCustomers);
+        console.log(`✅ ${newCustomers.length} novo(s) cliente(s) salvo(s) no SheetDB`);
+      }
+    } catch (error) {
+      console.warn('Erro ao verificar duplicatas de clientes no SheetDB:', error);
+      // Continua funcionando localmente mesmo se falhar
+    }
   },
   getCurrentCustomer: () => getFromStorage<Customer | null>(STORAGE_KEYS.CURRENT_CUSTOMER, null),
   setCurrentCustomer: (customer: Customer | null) => saveToStorage(STORAGE_KEYS.CURRENT_CUSTOMER, customer),

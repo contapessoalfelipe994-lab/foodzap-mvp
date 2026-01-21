@@ -198,7 +198,7 @@ const ProductManagement: React.FC = () => {
     <Layout title="Meus Produtos">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-6 sm:mb-8">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} className="sm:w-5 sm:h-5" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 sm:w-5 sm:h-5" size={18} />
           <input
             type="text"
             placeholder="Buscar produto ou categoria..."
