@@ -452,17 +452,26 @@ export const db = {
         }
       }
 
-      // Para lojas, mescla por ID
+      // Para lojas, mescla por ID e também por código (para evitar duplicatas)
       if (sheetStores.length > 0) {
         const localStores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
         const localStoreIds = new Set(localStores.map(s => s.id).filter(Boolean));
+        const localStoreCodes = new Set(localStores.map(s => s.code?.toUpperCase().trim()).filter(Boolean));
         
-        const newStores = sheetStores.filter(s => s.id && !localStoreIds.has(s.id));
+        // Filtra lojas novas (por ID) e também por código (para evitar duplicatas com IDs diferentes)
+        const newStores = sheetStores.filter(s => {
+          const hasId = s.id && !localStoreIds.has(s.id);
+          const hasCode = s.code && !localStoreCodes.has(s.code.toUpperCase().trim());
+          return hasId || hasCode;
+        });
         
         if (newStores.length > 0) {
           const mergedStores = [...localStores, ...newStores];
           saveToStorage(STORAGE_KEYS.STORES, mergedStores);
           console.log(`✅ ${newStores.length} loja(s) sincronizada(s) do Sheets`);
+          console.log('📋 Lojas sincronizadas:', newStores.map(s => ({ name: s.name, code: s.code, id: s.id })));
+        } else {
+          console.log('ℹ️ Nenhuma loja nova encontrada no Sheets para sincronizar');
         }
       }
 
@@ -549,12 +558,13 @@ export const db = {
         return null;
       }
       
-      let stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
       const normalizedCode = code.trim().toUpperCase();
+      console.log('🔍 [getStoreByCode] Buscando loja com código:', normalizedCode);
       
-      console.log('🔍 Buscando loja com código:', normalizedCode);
-      console.log('📦 Total de lojas no banco local:', stores.length);
-      console.log('📋 Códigos disponíveis:', stores.map(s => s.code || '(sem código)'));
+      // Primeiro tenta buscar localmente
+      let stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+      console.log('📦 [getStoreByCode] Total de lojas no banco local:', stores.length);
+      console.log('📋 [getStoreByCode] Códigos disponíveis localmente:', stores.map(s => s.code || '(sem código)'));
       
       // Busca case-insensitive e sem espaços
       let found = stores.find(s => {
@@ -566,46 +576,61 @@ export const db = {
       // Se não encontrou e syncFromSheet é true, tenta sincronizar do Sheets
       if (!found && syncFromSheet) {
         try {
-          console.log('🔄 Loja não encontrada localmente, sincronizando do Sheets...');
+          console.log('🔄 [getStoreByCode] Loja não encontrada localmente, sincronizando do Sheets...');
           await db.syncFromSheetDB();
+          
           // Busca novamente após sincronizar
           stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
-          console.log('📦 Total de lojas após sincronização:', stores.length);
-          console.log('📋 Códigos disponíveis após sincronização:', stores.map(s => s.code || '(sem código)'));
+          console.log('📦 [getStoreByCode] Total de lojas após sincronização:', stores.length);
+          console.log('📋 [getStoreByCode] Códigos disponíveis após sincronização:', stores.map(s => s.code || '(sem código)'));
           
+          // Tenta encontrar novamente
           found = stores.find(s => {
             if (!s.code) return false;
             const storeCode = s.code.trim().toUpperCase();
             return storeCode === normalizedCode;
           });
+          
+          if (found) {
+            console.log('✅ [getStoreByCode] Loja encontrada após sincronização:', found.id, found.name, 'Código:', found.code);
+          }
         } catch (syncError) {
-          console.warn('⚠️ Erro ao sincronizar do Sheets:', syncError);
+          console.error('❌ [getStoreByCode] Erro ao sincronizar do Sheets:', syncError);
           // Continua mesmo se falhar a sincronização
         }
       }
       
-      if (found) {
-        console.log('✅ Loja encontrada:', found.id, found.name, 'Código:', found.code);
-        return found;
-      } else {
-        console.warn('❌ Loja não encontrada com código:', normalizedCode);
-        // Tenta buscar sem normalização também (caso o código tenha sido salvo de forma diferente)
-        const foundAlt = stores.find(s => {
+      // Se ainda não encontrou, tenta busca alternativa (sem normalização)
+      if (!found) {
+        console.log('🔍 [getStoreByCode] Tentando busca alternativa...');
+        found = stores.find(s => {
           if (!s.code) return false;
-          return s.code.trim() === code.trim() || 
-                 s.code.trim().toUpperCase() === code.trim().toUpperCase() ||
-                 s.code.trim().toLowerCase() === code.trim().toLowerCase();
+          const storeCode = s.code.trim();
+          return storeCode === code.trim() || 
+                 storeCode.toUpperCase() === normalizedCode ||
+                 storeCode.toLowerCase() === code.trim().toLowerCase();
         });
         
-        if (foundAlt) {
-          console.log('✅ Loja encontrada (busca alternativa):', foundAlt.id, foundAlt.name);
-          return foundAlt;
+        if (found) {
+          console.log('✅ [getStoreByCode] Loja encontrada (busca alternativa):', found.id, found.name, 'Código:', found.code);
         }
-        
+      }
+      
+      if (found) {
+        console.log('✅ [getStoreByCode] Loja encontrada com sucesso:', found.id, found.name, 'Código:', found.code);
+        return found;
+      } else {
+        console.error('❌ [getStoreByCode] Loja NÃO encontrada com código:', normalizedCode);
+        console.error('📋 [getStoreByCode] Todas as lojas disponíveis:', stores.map(s => ({ 
+          id: s.id, 
+          name: s.name, 
+          code: s.code || '(sem código)',
+          codeNormalized: s.code ? s.code.trim().toUpperCase() : '(sem código)'
+        })));
         return null;
       }
     } catch (error) {
-      console.error('❌ Erro ao buscar loja por código:', error);
+      console.error('❌ [getStoreByCode] Erro ao buscar loja por código:', error);
       return null;
     }
   },

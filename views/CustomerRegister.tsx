@@ -41,12 +41,48 @@ const CustomerRegister: React.FC = () => {
         return;
       }
 
+      // Primeiro sincroniza do Sheets para garantir que temos todas as lojas
+      try {
+        console.log('🔄 [CustomerRegister] Sincronizando lojas do Sheets antes de validar código...');
+        await db.syncFromSheetDB();
+        console.log('✅ [CustomerRegister] Sincronização concluída');
+      } catch (syncError) {
+        console.warn('⚠️ [CustomerRegister] Erro ao sincronizar do Sheets, continuando com dados locais:', syncError);
+      }
+      
       // Verifica se o código da loja existe (sincroniza do Sheets se necessário)
-      const store = await db.getStoreByCode(formData.storeCode.toUpperCase().trim(), true);
+      const normalizedCode = formData.storeCode.toUpperCase().trim();
+      console.log('🔍 [CustomerRegister] Validando código da loja:', normalizedCode);
+      
+      // Lista todas as lojas antes de buscar
+      const allStoresBefore = db.getStores();
+      console.log('📋 [CustomerRegister] Lojas disponíveis antes da busca:', allStoresBefore.map(s => ({ 
+        name: s.name, 
+        code: s.code || '(sem código)',
+        id: s.id 
+      })));
+      
+      const store = await db.getStoreByCode(normalizedCode, true);
+      
+      // Lista todas as lojas depois de buscar
+      const allStoresAfter = db.getStores();
+      console.log('📋 [CustomerRegister] Lojas disponíveis depois da busca:', allStoresAfter.map(s => ({ 
+        name: s.name, 
+        code: s.code || '(sem código)',
+        id: s.id 
+      })));
+      
       if (!store || !store.id) {
-        setError('Código da loja inválido. Verifique o código que você recebeu.');
+        // Lista todas as lojas disponíveis para debug
+        const availableCodes = allStoresAfter.map(s => s.code || '(sem código)').filter(Boolean);
+        console.error('❌ [CustomerRegister] Código não encontrado. Código digitado:', normalizedCode);
+        console.error('❌ [CustomerRegister] Códigos disponíveis:', availableCodes);
+        
+        setError(`Código da loja inválido. Verifique o código que você recebeu. Código digitado: ${normalizedCode}`);
         return;
       }
+      
+      console.log('✅ [CustomerRegister] Código da loja válido:', store.name, store.code, store.id);
 
       // Verifica se já existe um cliente com este email
       const customers = db.getCustomers();
