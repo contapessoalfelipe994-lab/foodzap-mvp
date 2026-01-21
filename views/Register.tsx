@@ -18,63 +18,130 @@ const Register: React.FC = () => {
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const userId = Math.random().toString(36).substr(2, 9);
-    const storeId = Math.random().toString(36).substr(2, 9);
-    const slug = formData.storeName.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
-    // Gera código único de 6 caracteres alfanuméricos em maiúsculas
-    const storeCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-
-    const newUser: User = {
-      id: userId,
-      name: formData.name.trim(),
-      email: formData.email.toLowerCase().trim(),
-      password: formData.password.trim(),
-      storeId: storeId
-    };
-
-    const newStore: Store = {
-      id: storeId,
-      ownerId: userId,
-      name: formData.storeName,
-      slug: slug,
-      code: storeCode,
-      logo: 'https://picsum.photos/200',
-      banner: 'https://picsum.photos/800/200',
-      description: `Seja bem-vindo à ${formData.storeName}!`,
-      whatsapp: formData.whatsapp,
-      address: '',
-      deliveryType: 'both',
-      deliveryFee: 5.0,
-      isDeliveryFree: false,
-      appDiscountEnabled: true,
-      appDiscountValue: 10,
-      hours: {
-        open: '08:00',
-        close: '22:00',
-        isOpenAlways: false
+    try {
+      // Validações
+      if (!formData.name || !formData.name.trim()) {
+        alert('Por favor, preencha seu nome completo.');
+        return;
       }
-    };
 
-    db.saveUsers([...db.getUsers(), newUser]);
-    db.saveStores([...db.getStores(), newStore]);
-    
-    // Salva dados do cadastro no SheetDB com as colunas específicas
-    db.saveStoreOwnerRegistration({
-      email: formData.email.toLowerCase().trim(),
-      password: formData.password.trim(),
-      storeName: formData.storeName.trim(),
-      whatsapp: formData.whatsapp.trim(),
-      foodType: formData.foodType,
-      fullName: formData.name.trim()
-    }).catch(() => {
-      // Continua mesmo se falhar - não bloqueia o cadastro
-    });
-    
-    login(newUser);
-    navigate('/dashboard');
+      if (!formData.email || !formData.email.trim() || !formData.email.includes('@')) {
+        alert('Por favor, insira um e-mail válido.');
+        return;
+      }
+
+      if (!formData.password || formData.password.length < 4) {
+        alert('A senha deve ter pelo menos 4 caracteres.');
+        return;
+      }
+
+      if (!formData.storeName || !formData.storeName.trim()) {
+        alert('Por favor, preencha o nome da loja.');
+        return;
+      }
+
+      if (!formData.whatsapp || !formData.whatsapp.trim()) {
+        alert('Por favor, preencha o WhatsApp.');
+        return;
+      }
+
+      // Verifica se email já existe
+      const existingUsers = db.getUsers();
+      const emailExists = existingUsers.some(u => u.email?.toLowerCase().trim() === formData.email.toLowerCase().trim());
+      if (emailExists) {
+        alert('Este e-mail já está cadastrado. Por favor, faça login ou use outro e-mail.');
+        return;
+      }
+
+      const userId = Math.random().toString(36).substr(2, 9);
+      const storeId = Math.random().toString(36).substr(2, 9);
+      const slug = formData.storeName.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '');
+      // Gera código único de 6 caracteres alfanuméricos em maiúsculas
+      let storeCode = Math.random().toString(36).substring(2, 8).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      
+      // Garante que o código tenha exatamente 6 caracteres
+      while (storeCode.length < 6) {
+        storeCode = (storeCode + Math.random().toString(36).substring(2, 8).toUpperCase().replace(/[^A-Z0-9]/g, '')).substring(0, 6);
+      }
+      storeCode = storeCode.substring(0, 6);
+      
+      // Garante que o código seja único (case-insensitive)
+      const existingStores = db.getStores();
+      while (existingStores.some(s => s.code && s.code.toUpperCase().trim() === storeCode)) {
+        storeCode = Math.random().toString(36).substring(2, 8).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        while (storeCode.length < 6) {
+          storeCode = (storeCode + Math.random().toString(36).substring(2, 8).toUpperCase().replace(/[^A-Z0-9]/g, '')).substring(0, 6);
+        }
+        storeCode = storeCode.substring(0, 6);
+      }
+      
+      console.log('✅ Código da loja gerado:', storeCode);
+
+      const newUser: User = {
+        id: userId,
+        name: formData.name.trim(),
+        email: formData.email.toLowerCase().trim(),
+        password: formData.password.trim(),
+        storeId: storeId
+      };
+
+      const newStore: Store = {
+        id: storeId,
+        ownerId: userId,
+        name: formData.storeName.trim(),
+        slug: slug,
+        code: storeCode,
+        logo: 'https://picsum.photos/200',
+        banner: 'https://picsum.photos/800/200',
+        description: `Seja bem-vindo à ${formData.storeName.trim()}!`,
+        whatsapp: formData.whatsapp.trim(),
+        address: '',
+        deliveryType: 'both',
+        deliveryFee: 5.0,
+        isDeliveryFree: false,
+        appDiscountEnabled: true,
+        appDiscountValue: 10,
+        hours: {
+          open: '08:00',
+          close: '22:00',
+          isOpenAlways: false
+        },
+        customization: {
+          primaryColor: '#f97316',
+          secondaryColor: '#fb923c',
+          backgroundColor: '#fdfcfb',
+          textColor: '#1e293b',
+          accentColor: '#22c55e',
+          buttonStyle: 'rounded',
+          cardStyle: 'elevated',
+          fontSize: 'medium',
+          theme: 'light'
+        }
+      };
+
+      db.saveUsers([...existingUsers, newUser]);
+      db.saveStores([...existingStores, newStore]);
+      
+      // Salva dados do cadastro no SheetDB com as colunas específicas (não bloqueia se falhar)
+      db.saveStoreOwnerRegistration({
+        email: formData.email.toLowerCase().trim(),
+        password: formData.password.trim(),
+        storeName: formData.storeName.trim(),
+        whatsapp: formData.whatsapp.trim(),
+        foodType: formData.foodType,
+        fullName: formData.name.trim()
+      }).catch(() => {
+        // Continua mesmo se falhar - não bloqueia o cadastro
+      });
+      
+      login(newUser);
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Erro ao criar conta:', error);
+      alert('Erro ao criar conta. Por favor, tente novamente.');
+    }
   };
 
   return (

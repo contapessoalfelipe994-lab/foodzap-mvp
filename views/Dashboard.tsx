@@ -17,65 +17,94 @@ import {
 } from 'lucide-react';
 
 const Dashboard: React.FC = () => {
-  const { store } = useContext(AuthContext);
+  const context = useContext(AuthContext);
+  if (!context) {
+    return <Layout title="Erro">Erro ao carregar dados</Layout>;
+  }
+  const { store } = context;
   
   const stats = useMemo(() => {
-    const products = db.getProducts().filter(p => p.storeId === store?.id && p.isActive);
-    const orders = db.getOrders().filter(o => o.storeId === store?.id);
-    const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
+    try {
+      if (!store?.id) {
+        return { productsCount: 0, ordersCount: 0, revenue: 0 };
+      }
+      const products = db.getProducts().filter(p => p.storeId === store.id && p.isActive);
+      const orders = db.getOrders().filter(o => o.storeId === store.id);
+      const totalRevenue = orders.reduce((sum, o) => sum + (o.total || 0), 0);
 
-    return {
-      productsCount: products.length,
-      ordersCount: orders.length,
-      revenue: totalRevenue
-    };
+      return {
+        productsCount: products.length,
+        ordersCount: orders.length,
+        revenue: totalRevenue
+      };
+    } catch (error) {
+      console.error('Erro ao calcular estatísticas:', error);
+      return { productsCount: 0, ordersCount: 0, revenue: 0 };
+    }
   }, [store]);
 
   const [copied, setCopied] = React.useState(false);
 
   const copyStoreCode = () => {
-    if (!store?.code) return;
-    navigator.clipboard.writeText(store.code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 3000);
+    try {
+      if (!store?.code) {
+        alert('Código da loja não disponível.');
+        return;
+      }
+      navigator.clipboard.writeText(store.code).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 3000);
+      }).catch((error) => {
+        console.error('Erro ao copiar código:', error);
+        alert('Erro ao copiar código. Tente novamente.');
+      });
+    } catch (error) {
+      console.error('Erro ao copiar código:', error);
+      alert('Erro ao copiar código. Tente novamente.');
+    }
   };
 
   const isStoreOpen = useMemo(() => {
-    if (!store) return false;
-    if (store.hours.isOpenAlways) return true;
-    
-    const now = new Date();
-    const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    return currentTime >= store.hours.open && currentTime <= store.hours.close;
+    try {
+      if (!store?.hours) return false;
+      if (store.hours.isOpenAlways) return true;
+      
+      const now = new Date();
+      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      return currentTime >= (store.hours.open || '08:00') && currentTime <= (store.hours.close || '22:00');
+    } catch (error) {
+      console.error('Erro ao verificar horário da loja:', error);
+      return false;
+    }
   }, [store]);
 
   return (
     <Layout title="Bem-vindo de volta!">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-        <div className="bg-white p-8 rounded-[32px] shadow-sm border border-orange-50 group hover:shadow-xl transition-all duration-300">
-          <div className="w-14 h-14 bg-green-50 text-green-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-            <Coins size={28} strokeWidth={2.5} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-8 mb-8 sm:mb-12">
+        <div className="bg-white p-5 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl md:rounded-[32px] shadow-sm border border-orange-50 group hover:shadow-xl transition-all duration-300">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-green-50 text-green-500 rounded-xl sm:rounded-2xl flex items-center justify-center mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
+            <Coins size={24} className="sm:w-7 sm:h-7" strokeWidth={2.5} />
           </div>
           <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Ganhos no mês</p>
-          <p className="text-3xl font-black text-slate-800 mt-2 tracking-tight">
+          <p className="text-2xl sm:text-3xl font-black text-slate-800 mt-2 tracking-tight">
             R$ {stats.revenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </p>
         </div>
 
-        <div className="bg-white p-8 rounded-[32px] shadow-sm border border-orange-50 group hover:shadow-xl transition-all duration-300">
-          <div className="w-14 h-14 bg-orange-50 text-orange-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-            <ShoppingBag size={28} strokeWidth={2.5} />
+        <div className="bg-white p-5 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl md:rounded-[32px] shadow-sm border border-orange-50 group hover:shadow-xl transition-all duration-300">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-orange-50 text-orange-500 rounded-xl sm:rounded-2xl flex items-center justify-center mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
+            <ShoppingBag size={24} className="sm:w-7 sm:h-7" strokeWidth={2.5} />
           </div>
           <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Pedidos feitos</p>
-          <p className="text-3xl font-black text-slate-800 mt-2 tracking-tight">{stats.ordersCount}</p>
+          <p className="text-2xl sm:text-3xl font-black text-slate-800 mt-2 tracking-tight">{stats.ordersCount}</p>
         </div>
 
-        <div className="bg-white p-8 rounded-[32px] shadow-sm border border-orange-50 group hover:shadow-xl transition-all duration-300">
-          <div className="w-14 h-14 bg-blue-50 text-blue-500 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-            <TrendingUp size={28} strokeWidth={2.5} />
+        <div className="bg-white p-5 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl md:rounded-[32px] shadow-sm border border-orange-50 group hover:shadow-xl transition-all duration-300 sm:col-span-2 md:col-span-1">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-blue-50 text-blue-500 rounded-xl sm:rounded-2xl flex items-center justify-center mb-4 sm:mb-6 group-hover:scale-110 transition-transform">
+            <TrendingUp size={24} className="sm:w-7 sm:h-7" strokeWidth={2.5} />
           </div>
           <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Pratos ativos</p>
-          <p className="text-3xl font-black text-slate-800 mt-2 tracking-tight">{stats.productsCount}</p>
+          <p className="text-2xl sm:text-3xl font-black text-slate-800 mt-2 tracking-tight">{stats.productsCount}</p>
         </div>
       </div>
 

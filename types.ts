@@ -71,6 +71,16 @@ export interface Customer {
   password: string;
   storeCode: string; // Código da loja associada
   storeId: string; // ID da loja
+  savedAddress?: {
+    cep: string;
+    street: string;
+    neighborhood: string;
+    city: string;
+    state: string;
+    number: string;
+    complement: string;
+  };
+  preferredDeliveryType?: 'delivery' | 'pickup'; // Preferência de tipo de entrega
 }
 
 export interface Order {

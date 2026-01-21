@@ -17,20 +17,40 @@ const CustomerLogin: React.FC = () => {
     e.preventDefault();
     setError('');
 
-    const customers = db.getCustomers();
-    const customer = customers.find(c => c.email === email);
-
-    if (customer && customer.password === password) {
-      db.setCurrentCustomer(customer);
-      // Redireciona para a loja do cliente
-      const store = db.getStoreByCode(customer.storeCode);
-      if (store) {
-        navigate(`/loja/${store.code}`);
-      } else {
-        setError('Loja não encontrada. Verifique o código.');
+    try {
+      if (!email || !email.trim()) {
+        setError('Por favor, preencha o e-mail.');
+        return;
       }
-    } else {
-      setError('Credenciais inválidas. Tente novamente ou crie uma conta.');
+
+      if (!password || !password.trim()) {
+        setError('Por favor, preencha a senha.');
+        return;
+      }
+
+      const customers = db.getCustomers();
+      const normalizedEmail = email.toLowerCase().trim();
+      const customer = customers.find(c => c.email?.toLowerCase().trim() === normalizedEmail);
+
+      if (customer && customer.password === password.trim()) {
+        db.setCurrentCustomer(customer);
+        // Redireciona para a loja do cliente
+        if (customer.storeCode) {
+          const store = db.getStoreByCode(customer.storeCode);
+          if (store && store.code) {
+            navigate(`/loja/${store.code}`);
+          } else {
+            setError('Loja não encontrada. Verifique o código da loja.');
+          }
+        } else {
+          setError('Código da loja não encontrado. Entre em contato com o suporte.');
+        }
+      } else {
+        setError('Credenciais inválidas. Tente novamente ou crie uma conta.');
+      }
+    } catch (error) {
+      console.error('Erro ao fazer login:', error);
+      setError('Erro ao fazer login. Por favor, tente novamente.');
     }
   };
 

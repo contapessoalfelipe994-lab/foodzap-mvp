@@ -16,12 +16,29 @@ const STORAGE_KEYS = {
 };
 
 const getFromStorage = <T,>(key: string, defaultValue: T): T => {
-  const data = localStorage.getItem(key);
-  return data ? JSON.parse(data) : defaultValue;
+  try {
+    const data = localStorage.getItem(key);
+    if (!data) return defaultValue;
+    return JSON.parse(data) || defaultValue;
+  } catch (error) {
+    console.error(`Erro ao ler ${key} do localStorage:`, error);
+    return defaultValue;
+  }
 };
 
 const saveToStorage = <T,>(key: string, data: T) => {
-  localStorage.setItem(key, JSON.stringify(data));
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (error) {
+    console.error(`Erro ao salvar ${key} no localStorage:`, error);
+    // Tenta limpar e salvar novamente se o storage estiver cheio
+    try {
+      localStorage.removeItem(key);
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch (retryError) {
+      console.error(`Erro ao tentar salvar novamente ${key}:`, retryError);
+    }
+  }
 };
 
 // Funções para sincronizar com SheetDB
@@ -103,6 +120,20 @@ const saveStoreOwnerToSheetDB = async (data: {
   fullName: string;
 }) => {
   try {
+    // Verifica se o email já existe no SheetDB antes de salvar
+    try {
+      const response = await fetch(`${SHEETDB_API}/search?E-mail=${encodeURIComponent(data.email)}`);
+      const existing = await response.json();
+      
+      if (Array.isArray(existing) && existing.length > 0) {
+        console.log('⚠️ Email já existe no SheetDB, não será duplicado:', data.email);
+        return; // Não salva se já existe
+      }
+    } catch (checkError) {
+      // Se a verificação falhar, continua e tenta salvar
+      console.log('Não foi possível verificar duplicatas, continuando...');
+    }
+
     // Mapeia o foodType para texto legível
     const especialidadeMap: Record<string, string> = {
       'both': 'Doces e Salgados',
@@ -121,7 +152,7 @@ const saveStoreOwnerToSheetDB = async (data: {
       'Data Cadastro': new Date().toISOString().split('T')[0]
     };
 
-    await fetch(`${SHEETDB_API}`, {
+    const response = await fetch(`${SHEETDB_API}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -129,7 +160,11 @@ const saveStoreOwnerToSheetDB = async (data: {
       body: JSON.stringify(record)
     });
 
-    console.log('✅ Cadastro de lojista salvo no SheetDB');
+    if (!response.ok) {
+      throw new Error(`Erro HTTP: ${response.status}`);
+    }
+
+    console.log('✅ Cadastro de lojista salvo no SheetDB:', data.email);
   } catch (error) {
     console.warn('Erro ao salvar cadastro no SheetDB:', error);
     // Não interrompe o fluxo - continua funcionando localmente
@@ -275,11 +310,27 @@ const initializeDatabase = () => {
 export const db = {
   // Inicializa o banco de dados (chamar uma vez no início do app)
   initialize: () => {
-    initializeDatabase();
-    // Tenta sincronizar com SheetDB em background
-    db.syncFromSheetDB().catch(() => {
-      // Se falhar, continua funcionando localmente
-    });
+    try {
+      initializeDatabase();
+      // Tenta sincronizar com SheetDB em background
+      db.syncFromSheetDB().catch(() => {
+        // Se falhar, continua funcionando localmente
+      });
+    } catch (error) {
+      console.error('❌ Erro crítico ao inicializar banco de dados:', error);
+      // Tenta limpar e reinicializar
+      try {
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('foodzap_') && key !== 'foodzap_initialized') {
+            localStorage.removeItem(key);
+          }
+        });
+        // Tenta novamente
+        initializeDatabase();
+      } catch (retryError) {
+        console.error('❌ Erro ao tentar reinicializar:', retryError);
+      }
+    }
   },
 
   // Sincroniza dados do SheetDB para localStorage (opcional)
@@ -332,19 +383,61 @@ export const db = {
   getUsers: () => getFromStorage<User[]>(STORAGE_KEYS.USERS, []),
   saveUsers: (users: User[]) => {
     saveToStorage(STORAGE_KEYS.USERS, users);
-    // Sincroniza com SheetDB em background (não bloqueia)
-    syncToSheetDB('users', users).catch(() => {});
+    // NÃO sincroniza automaticamente com SheetDB para evitar duplicatas
+    // A sincronização é feita apenas através de saveStoreOwnerRegistration
   },
   
   getStores: () => getFromStorage<Store[]>(STORAGE_KEYS.STORES, []),
   saveStores: (stores: Store[]) => {
     saveToStorage(STORAGE_KEYS.STORES, stores);
-    // Sincroniza com SheetDB em background (não bloqueia)
-    syncToSheetDB('stores', stores).catch(() => {});
+    // NÃO sincroniza automaticamente com SheetDB para evitar duplicatas
+    // A sincronização é feita apenas através de saveStoreOwnerRegistration
   },
   getStoreByCode: (code: string) => {
-    const stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
-    return stores.find(s => s.code === code) || null;
+    try {
+      if (!code || !code.trim()) {
+        console.warn('⚠️ getStoreByCode: código vazio');
+        return null;
+      }
+      
+      const stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+      const normalizedCode = code.trim().toUpperCase();
+      
+      console.log('🔍 Buscando loja com código:', normalizedCode);
+      console.log('📦 Total de lojas no banco:', stores.length);
+      console.log('📋 Códigos disponíveis:', stores.map(s => s.code || '(sem código)'));
+      
+      // Busca case-insensitive e sem espaços
+      const found = stores.find(s => {
+        if (!s.code) return false;
+        const storeCode = s.code.trim().toUpperCase();
+        return storeCode === normalizedCode;
+      });
+      
+      if (found) {
+        console.log('✅ Loja encontrada:', found.id, found.name, 'Código:', found.code);
+        return found;
+      } else {
+        console.warn('❌ Loja não encontrada com código:', normalizedCode);
+        // Tenta buscar sem normalização também (caso o código tenha sido salvo de forma diferente)
+        const foundAlt = stores.find(s => {
+          if (!s.code) return false;
+          return s.code.trim() === code.trim() || 
+                 s.code.trim().toUpperCase() === code.trim().toUpperCase() ||
+                 s.code.trim().toLowerCase() === code.trim().toLowerCase();
+        });
+        
+        if (foundAlt) {
+          console.log('✅ Loja encontrada (busca alternativa):', foundAlt.id, foundAlt.name);
+          return foundAlt;
+        }
+        
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ Erro ao buscar loja por código:', error);
+      return null;
+    }
   },
   
   getProducts: () => getFromStorage<Product[]>(STORAGE_KEYS.PRODUCTS, []),

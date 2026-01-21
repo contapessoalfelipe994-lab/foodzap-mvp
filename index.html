@@ -3,14 +3,23 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>FoodZap - Sua Vitrine Deliciosa</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
         body { 
             font-family: 'Lexend', sans-serif; 
             background-color: #FDFCFB;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            touch-action: manipulation;
         }
         .food-gradient {
             background: linear-gradient(135deg, #FF5A05 0%, #FF8A05 100%);
@@ -18,6 +27,17 @@
         .glass-card {
             background: rgba(255, 255, 255, 0.8);
             backdrop-filter: blur(10px);
+        }
+        /* Melhorias para mobile */
+        @media (max-width: 768px) {
+            input, textarea, select, button {
+                font-size: 16px !important; /* Previne zoom no iOS */
+            }
+        }
+        /* Área de toque mínima para botões */
+        button, a, [role="button"] {
+            min-height: 44px;
+            min-width: 44px;
         }
     </style>
 <script type="importmap">

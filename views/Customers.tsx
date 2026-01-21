@@ -33,112 +33,150 @@ interface CustomerStats {
 }
 
 const Customers: React.FC = () => {
-  const { store } = useContext(AuthContext);
+  const context = useContext(AuthContext);
+  if (!context) {
+    return <Layout title="Erro">Erro ao carregar dados</Layout>;
+  }
+  const { store } = context;
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
 
   const customersStats = useMemo(() => {
-    if (!store) return [];
+    try {
+      if (!store?.id) return [];
 
-    const orders = db.getOrders().filter(o => o.storeId === store.id);
-    const products = db.getProducts();
+      const orders = db.getOrders().filter(o => o && o.storeId === store.id);
+      const products = db.getProducts();
     
     // Agrupa pedidos por nome do cliente
     const customerMap = new Map<string, Order[]>();
     
     orders.forEach(order => {
-      const customerName = order.customerName.toLowerCase().trim();
-      if (!customerMap.has(customerName)) {
-        customerMap.set(customerName, []);
+      if (!order || !order.customerName) return;
+      try {
+        const customerName = order.customerName.toLowerCase().trim();
+        if (!customerName) return;
+        if (!customerMap.has(customerName)) {
+          customerMap.set(customerName, []);
+        }
+        customerMap.get(customerName)!.push(order);
+      } catch (error) {
+        console.error('Erro ao processar pedido:', error, order);
       }
-      customerMap.get(customerName)!.push(order);
     });
 
     // Calcula estatísticas para cada cliente
     const stats: CustomerStats[] = [];
 
     customerMap.forEach((customerOrders, customerName) => {
-      const totalSpent = customerOrders.reduce((sum, o) => sum + o.total, 0);
-      const orderCount = customerOrders.length;
-      const averageOrderValue = totalSpent / orderCount;
+      try {
+        const totalSpent = customerOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+        const orderCount = customerOrders.length;
+        const averageOrderValue = orderCount > 0 ? totalSpent / orderCount : 0;
 
-      // Conta produtos mais pedidos
-      const productCount = new Map<string, number>();
-      const categoryCount = new Map<Category, number>();
-      
-      customerOrders.forEach(order => {
-        order.items.forEach(item => {
-          // Conta produto
-          const current = productCount.get(item.name) || 0;
-          productCount.set(item.name, current + item.quantity);
+        // Conta produtos mais pedidos
+        const productCount = new Map<string, number>();
+        const categoryCount = new Map<Category, number>();
+        
+        customerOrders.forEach(order => {
+          if (!order || !order.items) return;
+          try {
+            order.items.forEach(item => {
+              if (!item || !item.name) return;
+              // Conta produto
+              const itemName = item.name;
+              const itemQuantity = item.quantity || 0;
+              const current = productCount.get(itemName) || 0;
+              productCount.set(itemName, current + itemQuantity);
 
-          // Conta categoria
-          const product = products.find(p => p.id === item.productId);
-          if (product) {
-            const catCurrent = categoryCount.get(product.category) || 0;
-            categoryCount.set(product.category, catCurrent + item.quantity);
+              // Conta categoria
+              if (item.productId) {
+                const product = products.find(p => p && p.id === item.productId);
+                if (product && product.category) {
+                  const catCurrent = categoryCount.get(product.category) || 0;
+                  categoryCount.set(product.category, catCurrent + itemQuantity);
+                }
+              }
+            });
+          } catch (error) {
+            console.error('Erro ao processar itens do pedido:', error, order);
           }
         });
-      });
 
-      // Produto favorito
-      let favoriteProduct: { name: string; count: number } | null = null;
-      productCount.forEach((count, name) => {
-        if (!favoriteProduct || count > favoriteProduct.count) {
-          favoriteProduct = { name, count };
-        }
-      });
+        // Produto favorito
+        let favoriteProduct: { name: string; count: number } | null = null;
+        productCount.forEach((count, name) => {
+          if (!favoriteProduct || count > favoriteProduct.count) {
+            favoriteProduct = { name, count };
+          }
+        });
 
-      // Categoria favorita
-      let favoriteCategory: { category: string; count: number } | null = null;
-      categoryCount.forEach((count, category) => {
-        if (!favoriteCategory || count > favoriteCategory.count) {
-          favoriteCategory = { category, count };
-        }
-      });
+        // Categoria favorita
+        let favoriteCategory: { category: string; count: number } | null = null;
+        categoryCount.forEach((count, category) => {
+          if (!favoriteCategory || count > favoriteCategory.count) {
+            favoriteCategory = { category, count };
+          }
+        });
 
-      // Endereços únicos
-      const addresses = Array.from(
-        new Set(customerOrders.filter(o => o.address).map(o => o.address!))
-      );
+        // Endereços únicos
+        const addresses = Array.from(
+          new Set(customerOrders.filter(o => o && o.address).map(o => o.address!))
+        );
 
-      // Preferência de entrega
-      const deliveryPreference = customerOrders.reduce(
-        (acc, o) => {
-          acc[o.deliveryType]++;
-          return acc;
-        },
-        { delivery: 0, pickup: 0 }
-      );
+        // Preferência de entrega
+        const deliveryPreference = customerOrders.reduce(
+          (acc, o) => {
+            if (o && o.deliveryType) {
+              const type = o.deliveryType === 'delivery' ? 'delivery' : 'pickup';
+              acc[type] = (acc[type] || 0) + 1;
+            }
+            return acc;
+          },
+          { delivery: 0, pickup: 0 }
+        );
 
-      // Última data de pedido
-      const sortedOrders = [...customerOrders].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-      const lastOrderDate = sortedOrders[0].createdAt;
+        // Última data de pedido
+        const sortedOrders = [...customerOrders].sort((a, b) => {
+          try {
+            const dateA = a && a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const dateB = b && b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return dateB - dateA;
+          } catch {
+            return 0;
+          }
+        });
+        const lastOrderDate = sortedOrders[0]?.createdAt || new Date().toISOString();
 
       // Busca email do cliente cadastrado
       const registeredCustomer = db.getCustomers().find(
         c => c.name.toLowerCase().trim() === customerName && c.storeId === store.id
       );
 
-      stats.push({
-        name: customerOrders[0].customerName, // Usa o nome original do primeiro pedido
-        email: registeredCustomer?.email,
-        totalSpent,
-        orderCount,
-        favoriteProduct,
-        favoriteCategory,
-        lastOrderDate,
-        addresses,
-        deliveryPreference,
-        averageOrderValue,
-        orders: sortedOrders
-      } as CustomerStats);
+        stats.push({
+          name: customerOrders[0]?.customerName || customerName, // Usa o nome original do primeiro pedido
+          email: registeredCustomer?.email,
+          totalSpent,
+          orderCount,
+          favoriteProduct,
+          favoriteCategory,
+          lastOrderDate,
+          addresses,
+          deliveryPreference,
+          averageOrderValue,
+          orders: sortedOrders
+        } as CustomerStats);
+      } catch (error) {
+        console.error('Erro ao processar cliente:', error, customerName);
+      }
     });
 
-    // Ordena por total gasto (maior primeiro)
-    return stats.sort((a, b) => b.totalSpent - a.totalSpent);
+      // Ordena por total gasto (maior primeiro)
+      return stats.sort((a, b) => (b.totalSpent || 0) - (a.totalSpent || 0));
+    } catch (error) {
+      console.error('Erro ao calcular estatísticas de clientes:', error);
+      return [];
+    }
   }, [store]);
 
   const filteredCustomers = useMemo(() => {
@@ -152,7 +190,19 @@ const Customers: React.FC = () => {
     );
   }, [customersStats, searchTerm]);
 
-  if (!store) return null;
+  if (!store) {
+    return (
+      <Layout title="Clientes">
+        <div className="bg-white rounded-3xl p-12 text-center border border-slate-100">
+          <div className="w-20 h-20 bg-slate-50 text-slate-300 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Users size={40} />
+          </div>
+          <h3 className="text-xl font-bold text-slate-800">Loja não encontrada</h3>
+          <p className="text-slate-500 mt-2">Configure sua loja primeiro na aba "Minha Loja"</p>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout title="Clientes">
@@ -171,7 +221,7 @@ const Customers: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <DollarSign size={32} className="opacity-80" />
               <div className="text-3xl font-black">
-                R$ {customersStats.reduce((sum, c) => sum + c.totalSpent, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                R$ {customersStats.reduce((sum, c) => sum + (c.totalSpent || 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
             <p className="text-green-100 font-bold text-sm uppercase tracking-wider">Receita Total</p>
@@ -181,7 +231,7 @@ const Customers: React.FC = () => {
             <div className="flex items-center justify-between mb-4">
               <ShoppingBag size={32} className="opacity-80" />
               <div className="text-3xl font-black">
-                {customersStats.reduce((sum, c) => sum + c.orderCount, 0)}
+                {customersStats.reduce((sum, c) => sum + (c.orderCount || 0), 0)}
               </div>
             </div>
             <p className="text-blue-100 font-bold text-sm uppercase tracking-wider">Total de Pedidos</p>
@@ -223,7 +273,17 @@ const Customers: React.FC = () => {
                 {/* Header do Cliente */}
                 <div
                   className="p-6 cursor-pointer"
-                  onClick={() => setExpandedCustomer(expandedCustomer === customer.name ? null : customer.name)}
+                  onClick={(e) => {
+                    try {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (customer && customer.name) {
+                        setExpandedCustomer(expandedCustomer === customer.name ? null : customer.name);
+                      }
+                    } catch (error) {
+                      console.error('Erro ao expandir cliente:', error);
+                    }
+                  }}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
@@ -249,7 +309,7 @@ const Customers: React.FC = () => {
                     <div className="flex items-center gap-6">
                       <div className="text-right">
                         <div className="text-2xl font-black text-green-600">
-                          R$ {customer.totalSpent.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          R$ {(customer.totalSpent || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </div>
                         <div className="text-xs text-slate-400 font-bold uppercase">
                           Total Gasto
@@ -267,12 +327,12 @@ const Customers: React.FC = () => {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                     <div className="bg-orange-50 p-4 rounded-2xl">
                       <div className="text-xs font-black text-orange-600 uppercase tracking-wider mb-1">Pedidos</div>
-                      <div className="text-2xl font-black text-slate-800">{customer.orderCount}</div>
+                      <div className="text-2xl font-black text-slate-800">{customer.orderCount || 0}</div>
                     </div>
                     <div className="bg-blue-50 p-4 rounded-2xl">
                       <div className="text-xs font-black text-blue-600 uppercase tracking-wider mb-1">Ticket Médio</div>
                       <div className="text-2xl font-black text-slate-800">
-                        R$ {customer.averageOrderValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        R$ {(customer.averageOrderValue || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     </div>
                     {customer.favoriteProduct && (
@@ -307,13 +367,24 @@ const Customers: React.FC = () => {
                         Último Pedido
                       </div>
                       <div className="text-sm font-medium text-slate-600">
-                        {new Date(customer.lastOrderDate).toLocaleDateString('pt-BR', {
-                          day: '2-digit',
-                          month: 'long',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
+                        {(() => {
+                          try {
+                            const date = new Date(customer.lastOrderDate);
+                            if (isNaN(date.getTime())) {
+                              return 'Data inválida';
+                            }
+                            return date.toLocaleDateString('pt-BR', {
+                              day: '2-digit',
+                              month: 'long',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            });
+                          } catch (error) {
+                            console.error('Erro ao formatar data:', error);
+                            return 'Data não disponível';
+                          }
+                        })()}
                       </div>
                     </div>
 
@@ -325,15 +396,15 @@ const Customers: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2">
-                          <div className={`w-3 h-3 rounded-full ${customer.deliveryPreference.delivery > customer.deliveryPreference.pickup ? 'bg-blue-500' : 'bg-blue-200'}`}></div>
+                          <div className={`w-3 h-3 rounded-full ${(customer.deliveryPreference?.delivery || 0) > (customer.deliveryPreference?.pickup || 0) ? 'bg-blue-500' : 'bg-blue-200'}`}></div>
                           <span className="text-sm font-medium text-slate-700">
-                            Delivery: {customer.deliveryPreference.delivery}x
+                            Delivery: {customer.deliveryPreference?.delivery || 0}x
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className={`w-3 h-3 rounded-full ${customer.deliveryPreference.pickup > customer.deliveryPreference.delivery ? 'bg-purple-500' : 'bg-purple-200'}`}></div>
+                          <div className={`w-3 h-3 rounded-full ${(customer.deliveryPreference?.pickup || 0) > (customer.deliveryPreference?.delivery || 0) ? 'bg-purple-500' : 'bg-purple-200'}`}></div>
                           <span className="text-sm font-medium text-slate-700">
-                            Retirada: {customer.deliveryPreference.pickup}x
+                            Retirada: {customer.deliveryPreference?.pickup || 0}x
                           </span>
                         </div>
                       </div>
@@ -360,29 +431,45 @@ const Customers: React.FC = () => {
                     <div className="bg-white p-4 rounded-2xl">
                       <div className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-wider mb-3">
                         <ShoppingBag size={14} />
-                        Histórico de Pedidos ({customer.orders.length})
+                        Histórico de Pedidos ({(customer.orders?.length || 0)})
                       </div>
                       <div className="space-y-3 max-h-60 overflow-auto">
-                        {customer.orders.map(order => (
-                          <div key={order.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
-                            <div>
-                              <div className="text-xs font-bold text-slate-400">
-                                {new Date(order.createdAt).toLocaleDateString('pt-BR')}
+                        {customer.orders.map(order => {
+                          if (!order || !order.id) return null;
+                          try {
+                            const orderDate = order.createdAt ? new Date(order.createdAt) : new Date();
+                            const formattedDate = isNaN(orderDate.getTime()) 
+                              ? 'Data inválida' 
+                              : orderDate.toLocaleDateString('pt-BR');
+                            const orderTotal = order.total || 0;
+                            const itemsCount = order.items?.length || 0;
+                            const deliveryType = order.deliveryType || 'pickup';
+                            
+                            return (
+                              <div key={order.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+                                <div>
+                                  <div className="text-xs font-bold text-slate-400">
+                                    {formattedDate}
+                                  </div>
+                                  <div className="text-sm font-medium text-slate-700">
+                                    {itemsCount} item(s)
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-sm font-black text-slate-800">
+                                    R$ {orderTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                  </div>
+                                  <div className="text-xs text-slate-500">
+                                    {deliveryType === 'delivery' ? 'Delivery' : 'Retirada'}
+                                  </div>
+                                </div>
                               </div>
-                              <div className="text-sm font-medium text-slate-700">
-                                {order.items.length} item(s)
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-sm font-black text-slate-800">
-                                R$ {order.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                              </div>
-                              <div className="text-xs text-slate-500">
-                                {order.deliveryType === 'delivery' ? 'Delivery' : 'Retirada'}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                            );
+                          } catch (error) {
+                            console.error('Erro ao renderizar pedido:', error, order);
+                            return null;
+                          }
+                        })}
                       </div>
                     </div>
                   </div>

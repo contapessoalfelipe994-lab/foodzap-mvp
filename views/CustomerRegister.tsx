@@ -19,35 +19,61 @@ const CustomerRegister: React.FC = () => {
     e.preventDefault();
     setError('');
 
-    // Verifica se o código da loja existe
-    const store = db.getStoreByCode(formData.storeCode.toUpperCase());
-    if (!store) {
-      setError('Código da loja inválido. Verifique o código que você recebeu.');
-      return;
+    try {
+      // Validações
+      if (!formData.storeCode || !formData.storeCode.trim()) {
+        setError('Por favor, insira o código da loja.');
+        return;
+      }
+
+      if (!formData.name || !formData.name.trim()) {
+        setError('Por favor, preencha seu nome completo.');
+        return;
+      }
+
+      if (!formData.email || !formData.email.trim() || !formData.email.includes('@')) {
+        setError('Por favor, insira um e-mail válido.');
+        return;
+      }
+
+      if (!formData.password || formData.password.length < 4) {
+        setError('A senha deve ter pelo menos 4 caracteres.');
+        return;
+      }
+
+      // Verifica se o código da loja existe
+      const store = db.getStoreByCode(formData.storeCode.toUpperCase().trim());
+      if (!store || !store.id) {
+        setError('Código da loja inválido. Verifique o código que você recebeu.');
+        return;
+      }
+
+      // Verifica se já existe um cliente com este email
+      const customers = db.getCustomers();
+      const existingCustomer = customers.find(c => c.email?.toLowerCase().trim() === formData.email.toLowerCase().trim());
+      if (existingCustomer) {
+        setError('Este email já está cadastrado. Faça login ou use outro email.');
+        return;
+      }
+
+      const customerId = Math.random().toString(36).substr(2, 9);
+
+      const newCustomer: Customer = {
+        id: customerId,
+        name: formData.name.trim(),
+        email: formData.email.toLowerCase().trim(),
+        password: formData.password.trim(),
+        storeCode: formData.storeCode.toUpperCase().trim(),
+        storeId: store.id
+      };
+
+      db.saveCustomers([...customers, newCustomer]);
+      db.setCurrentCustomer(newCustomer);
+      navigate(`/loja/${store.code}`);
+    } catch (error) {
+      console.error('Erro ao cadastrar cliente:', error);
+      setError('Erro ao cadastrar. Por favor, tente novamente.');
     }
-
-    // Verifica se já existe um cliente com este email
-    const customers = db.getCustomers();
-    const existingCustomer = customers.find(c => c.email === formData.email);
-    if (existingCustomer) {
-      setError('Este email já está cadastrado. Faça login ou use outro email.');
-      return;
-    }
-
-    const customerId = Math.random().toString(36).substr(2, 9);
-
-    const newCustomer: Customer = {
-      id: customerId,
-      name: formData.name,
-      email: formData.email,
-      password: formData.password,
-      storeCode: formData.storeCode.toUpperCase(),
-      storeId: store.id
-    };
-
-    db.saveCustomers([...customers, newCustomer]);
-    db.setCurrentCustomer(newCustomer);
-    navigate(`/loja/${store.code}`);
   };
 
   return (

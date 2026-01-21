@@ -6,14 +6,19 @@ import { useNavigate } from 'react-router-dom';
 import { Eye, ExternalLink, ArrowLeft } from 'lucide-react';
 
 const StorePreview: React.FC = () => {
-  const { store } = useContext(AuthContext);
+  const context = useContext(AuthContext);
+  if (!context) {
+    return <Layout title="Erro">Erro ao carregar dados</Layout>;
+  }
+  const { store } = context;
   const navigate = useNavigate();
 
-  if (!store) {
+  if (!store || !store.code) {
     return (
       <Layout title="Preview da Loja">
         <div className="text-center py-20">
           <p className="text-slate-400 font-bold">Loja não encontrada</p>
+          <p className="text-slate-500 text-sm mt-2">Configure sua loja primeiro na aba "Minha Loja"</p>
         </div>
       </Layout>
     );

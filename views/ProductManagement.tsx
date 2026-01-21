@@ -7,7 +7,11 @@ import { Product, Category } from '../types';
 import { Plus, Search, Edit2, Trash2, Camera, Upload, X } from 'lucide-react';
 
 const ProductManagement: React.FC = () => {
-  const { store } = useContext(AuthContext);
+  const context = useContext(AuthContext);
+  if (!context) {
+    return <Layout title="Erro">Erro ao carregar dados</Layout>;
+  }
+  const { store } = context;
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -24,24 +28,64 @@ const ProductManagement: React.FC = () => {
   });
 
   useEffect(() => {
-    loadProducts();
-  }, []);
+    try {
+      if (store?.id) {
+        loadProducts();
+      } else {
+        setProducts([]);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar produtos:', error);
+      setProducts([]);
+    }
+  }, [store?.id]); // Recarrega quando a loja mudar
 
   const loadProducts = () => {
-    const allProducts = db.getProducts();
-    // Filtra produtos da loja atual
-    const storeProducts = allProducts.filter(p => p.storeId === store?.id);
-    setProducts(storeProducts); 
+    try {
+      if (!store?.id) {
+        setProducts([]);
+        return;
+      }
+      const allProducts = db.getProducts();
+      // Filtra produtos da loja atual
+      const storeProducts = allProducts.filter(p => p.storeId === store.id);
+      setProducts(storeProducts);
+    } catch (error) {
+      console.error('Erro ao carregar produtos:', error);
+      setProducts([]);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, image: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
+    try {
+      const file = e.target.files?.[0];
+      if (file) {
+        // Valida tamanho do arquivo (máximo 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+          alert('A imagem é muito grande. Por favor, escolha uma imagem menor que 5MB.');
+          return;
+        }
+
+        // Valida tipo do arquivo
+        if (!file.type.startsWith('image/')) {
+          alert('Por favor, selecione um arquivo de imagem válido.');
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (reader.result) {
+            setFormData(prev => ({ ...prev, image: reader.result as string }));
+          }
+        };
+        reader.onerror = () => {
+          alert('Erro ao carregar a imagem. Tente novamente.');
+        };
+        reader.readAsDataURL(file);
+      }
+    } catch (error) {
+      console.error('Erro ao processar arquivo:', error);
+      alert('Erro ao processar a imagem. Tente novamente.');
     }
   };
 
@@ -72,34 +116,76 @@ const ProductManagement: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const allProducts = db.getProducts();
-    
-    if (editingProduct) {
-      const updated = allProducts.map(p => p.id === editingProduct.id ? {
-        ...p,
-        ...formData,
-        price: parseFloat(formData.price)
-      } : p);
-      db.saveProducts(updated);
-    } else {
-      const newProduct: Product = {
-        id: Math.random().toString(36).substr(2, 9),
-        ...formData,
-        price: parseFloat(formData.price),
-        storeId: store?.id || ''
-      };
-      db.saveProducts([...allProducts, newProduct]);
+    try {
+      if (!store?.id) {
+        alert('Erro: Loja não encontrada. Por favor, recarregue a página.');
+        return;
+      }
+
+      // Validações
+      if (!formData.name || !formData.name.trim()) {
+        alert('Por favor, preencha o nome do produto.');
+        return;
+      }
+
+      if (!formData.price || isNaN(parseFloat(formData.price)) || parseFloat(formData.price) <= 0) {
+        alert('Por favor, insira um preço válido maior que zero.');
+        return;
+      }
+
+      const allProducts = db.getProducts();
+      
+      if (editingProduct && editingProduct.id) {
+        const updated = allProducts.map(p => {
+          if (p.id === editingProduct.id) {
+            return {
+              ...p,
+              ...formData,
+              price: parseFloat(formData.price),
+              storeId: store.id
+            } as Product;
+          }
+          return p;
+        });
+        db.saveProducts(updated);
+      } else {
+        const newProduct: Product = {
+          id: Math.random().toString(36).substr(2, 9),
+          name: formData.name.trim(),
+          description: formData.description?.trim() || '',
+          price: parseFloat(formData.price),
+          category: formData.category || Category.OUTROS,
+          image: formData.image || '',
+          isActive: formData.isActive !== undefined ? formData.isActive : true,
+          storeId: store.id
+        };
+        db.saveProducts([...allProducts, newProduct]);
+      }
+      
+      setIsModalOpen(false);
+      loadProducts();
+    } catch (error) {
+      console.error('Erro ao salvar produto:', error);
+      alert('Erro ao salvar produto. Por favor, tente novamente.');
     }
-    
-    setIsModalOpen(false);
-    loadProducts();
   };
 
   const handleDelete = (id: string) => {
-    if (window.confirm('Excluir este produto?')) {
-      const allProducts = db.getProducts();
-      db.saveProducts(allProducts.filter(p => p.id !== id));
-      loadProducts();
+    try {
+      if (!id) {
+        alert('Erro: ID do produto não encontrado.');
+        return;
+      }
+
+      if (window.confirm('Tem certeza que deseja excluir este produto?')) {
+        const allProducts = db.getProducts();
+        const filtered = allProducts.filter(p => p.id !== id);
+        db.saveProducts(filtered);
+        loadProducts();
+      }
+    } catch (error) {
+      console.error('Erro ao excluir produto:', error);
+      alert('Erro ao excluir produto. Por favor, tente novamente.');
     }
   };
 
@@ -110,27 +196,28 @@ const ProductManagement: React.FC = () => {
 
   return (
     <Layout title="Meus Produtos">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-6 sm:mb-8">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} className="sm:w-5 sm:h-5" />
           <input
             type="text"
             placeholder="Buscar produto ou categoria..."
-            className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none transition-all"
+            className="w-full pl-9 sm:pl-10 pr-4 py-2.5 sm:py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none transition-all text-base min-h-[44px]"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
         </div>
         <button 
           onClick={() => handleOpenModal()}
-          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-orange-100 transition-all active:scale-95"
+          className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-orange-100 transition-all active:scale-95 min-h-[44px] text-sm sm:text-base w-full sm:w-auto"
         >
-          <Plus size={20} />
-          Novo Produto
+          <Plus size={18} className="sm:w-5 sm:h-5" />
+          <span className="hidden sm:inline">Novo Produto</span>
+          <span className="sm:hidden">Novo</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {filteredProducts.map(product => (
           <div key={product.id} className="bg-white rounded-3xl overflow-hidden shadow-sm border border-slate-100 hover:shadow-md transition-all">
             <div className="h-48 overflow-hidden relative bg-slate-100">
