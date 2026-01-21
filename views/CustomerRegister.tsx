@@ -41,32 +41,41 @@ const CustomerRegister: React.FC = () => {
         return;
       }
 
-      // Primeiro sincroniza do Sheets para garantir que temos todas as lojas
-      try {
-        console.log('🔄 [CustomerRegister] Sincronizando lojas do Sheets antes de validar código...');
-        await db.syncFromSheetDB();
-        console.log('✅ [CustomerRegister] Sincronização concluída');
-      } catch (syncError) {
-        console.warn('⚠️ [CustomerRegister] Erro ao sincronizar do Sheets, continuando com dados locais:', syncError);
-      }
-      
-      // Verifica se o código da loja existe (sincroniza do Sheets se necessário)
       const normalizedCode = formData.storeCode.toUpperCase().trim();
       console.log('🔍 [CustomerRegister] Validando código da loja:', normalizedCode);
       
-      // Lista todas as lojas antes de buscar
-      const allStoresBefore = db.getStores();
-      console.log('📋 [CustomerRegister] Lojas disponíveis antes da busca:', allStoresBefore.map(s => ({ 
-        name: s.name, 
-        code: s.code || '(sem código)',
-        id: s.id 
-      })));
+      // Primeiro tenta buscar localmente (mais rápido)
+      let store = await db.getStoreByCode(normalizedCode, false);
       
-      const store = await db.getStoreByCode(normalizedCode, true);
+      // Se não encontrou localmente, sincroniza do Sheets e tenta novamente
+      if (!store || !store.id) {
+        try {
+          console.log('🔄 [CustomerRegister] Loja não encontrada localmente, sincronizando do Sheets...');
+          
+          // Sincroniza com timeout para evitar travamento no mobile
+          const syncPromise = db.syncFromSheetDB();
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout na sincronização')), 10000)
+          );
+          
+          await Promise.race([syncPromise, timeoutPromise]);
+          console.log('✅ [CustomerRegister] Sincronização concluída');
+          
+          // Tenta buscar novamente após sincronizar
+          store = await db.getStoreByCode(normalizedCode, false);
+        } catch (syncError) {
+          console.warn('⚠️ [CustomerRegister] Erro ao sincronizar do Sheets:', syncError);
+          // Tenta buscar novamente mesmo se a sincronização falhar (pode ter carregado parcialmente)
+          if (!store || !store.id) {
+            store = await db.getStoreByCode(normalizedCode, false);
+          }
+        }
+      }
       
-      // Lista todas as lojas depois de buscar
-      const allStoresAfter = db.getStores();
-      console.log('📋 [CustomerRegister] Lojas disponíveis depois da busca:', allStoresAfter.map(s => ({ 
+      // Lista todas as lojas disponíveis para debug
+      const allStores = db.getStores();
+      console.log('📋 [CustomerRegister] Total de lojas disponíveis:', allStores.length);
+      console.log('📋 [CustomerRegister] Lojas disponíveis:', allStores.map(s => ({ 
         name: s.name, 
         code: s.code || '(sem código)',
         id: s.id 
@@ -74,11 +83,16 @@ const CustomerRegister: React.FC = () => {
       
       if (!store || !store.id) {
         // Lista todas as lojas disponíveis para debug
-        const availableCodes = allStoresAfter.map(s => s.code || '(sem código)').filter(Boolean);
+        const availableCodes = allStores.map(s => s.code || '(sem código)').filter(Boolean);
         console.error('❌ [CustomerRegister] Código não encontrado. Código digitado:', normalizedCode);
         console.error('❌ [CustomerRegister] Códigos disponíveis:', availableCodes);
         
-        setError(`Código da loja inválido. Verifique o código que você recebeu. Código digitado: ${normalizedCode}`);
+        // Mensagem mais amigável para mobile
+        if (availableCodes.length === 0) {
+          setError('Nenhuma loja encontrada. Verifique sua conexão com a internet e tente novamente.');
+        } else {
+          setError(`Código "${normalizedCode}" não encontrado. Verifique o código que você recebeu do lojista.`);
+        }
         return;
       }
       

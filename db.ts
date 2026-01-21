@@ -17,26 +17,50 @@ const STORAGE_KEYS = {
 
 const getFromStorage = <T,>(key: string, defaultValue: T): T => {
   try {
+    // Verifica se localStorage está disponível (importante para mobile)
+    if (typeof Storage === 'undefined' || !localStorage) {
+      console.warn(`⚠️ localStorage não disponível para ${key}`);
+      return defaultValue;
+    }
+    
     const data = localStorage.getItem(key);
     if (!data) return defaultValue;
-    return JSON.parse(data) || defaultValue;
+    
+    const parsed = JSON.parse(data);
+    return parsed || defaultValue;
   } catch (error) {
-    console.error(`Erro ao ler ${key} do localStorage:`, error);
+    console.error(`❌ Erro ao ler ${key} do localStorage:`, error);
+    // Tenta limpar dados corrompidos
+    try {
+      if (typeof Storage !== 'undefined' && localStorage) {
+        localStorage.removeItem(key);
+      }
+    } catch (cleanError) {
+      console.error(`❌ Erro ao limpar ${key}:`, cleanError);
+    }
     return defaultValue;
   }
 };
 
 const saveToStorage = <T,>(key: string, data: T) => {
   try {
+    // Verifica se localStorage está disponível (importante para mobile)
+    if (typeof Storage === 'undefined' || !localStorage) {
+      console.warn(`⚠️ localStorage não disponível para salvar ${key}`);
+      return;
+    }
+    
     localStorage.setItem(key, JSON.stringify(data));
   } catch (error) {
-    console.error(`Erro ao salvar ${key} no localStorage:`, error);
+    console.error(`❌ Erro ao salvar ${key} no localStorage:`, error);
     // Tenta limpar e salvar novamente se o storage estiver cheio
     try {
-      localStorage.removeItem(key);
-      localStorage.setItem(key, JSON.stringify(data));
+      if (typeof Storage !== 'undefined' && localStorage) {
+        localStorage.removeItem(key);
+        localStorage.setItem(key, JSON.stringify(data));
+      }
     } catch (retryError) {
-      console.error(`Erro ao tentar salvar novamente ${key}:`, retryError);
+      console.error(`❌ Erro ao tentar salvar novamente ${key}:`, retryError);
     }
   }
 };
@@ -424,14 +448,35 @@ export const db = {
   // Sincroniza dados do SheetDB para localStorage (opcional)
   syncFromSheetDB: async () => {
     try {
+      // Verifica se localStorage está disponível
+      if (typeof Storage === 'undefined' || !localStorage) {
+        console.warn('⚠️ [syncFromSheetDB] localStorage não disponível');
+        return;
+      }
+      
       // Tenta buscar dados do SheetDB e mesclar com local
-      const [sheetUsers, sheetStores, sheetProducts, sheetOrders, sheetCustomers] = await Promise.all([
+      // Usa Promise.allSettled para não falhar completamente se uma requisição falhar
+      const results = await Promise.allSettled([
         getFromSheetDB<User[]>('users', []),
         getFromSheetDB<Store[]>('stores', []),
         getFromSheetDB<Product[]>('products', []),
         getFromSheetDB<Order[]>('orders', []),
         getFromSheetDB<Customer[]>('customers', [])
       ]);
+      
+      const sheetUsers = results[0].status === 'fulfilled' ? results[0].value : [];
+      const sheetStores = results[1].status === 'fulfilled' ? results[1].value : [];
+      const sheetProducts = results[2].status === 'fulfilled' ? results[2].value : [];
+      const sheetOrders = results[3].status === 'fulfilled' ? results[3].value : [];
+      const sheetCustomers = results[4].status === 'fulfilled' ? results[4].value : [];
+      
+      // Log de quais requisições falharam
+      results.forEach((result, index) => {
+        const tables = ['users', 'stores', 'products', 'orders', 'customers'];
+        if (result.status === 'rejected') {
+          console.warn(`⚠️ [syncFromSheetDB] Falha ao buscar ${tables[index]}:`, result.reason);
+        }
+      });
 
       // Mescla dados do Sheets com dados locais (evita duplicatas)
       // Para clientes, mescla por email
@@ -554,41 +599,83 @@ export const db = {
   getStoreByCode: async (code: string, syncFromSheet: boolean = true) => {
     try {
       if (!code || !code.trim()) {
-        console.warn('⚠️ getStoreByCode: código vazio');
+        console.warn('⚠️ [getStoreByCode] código vazio');
         return null;
       }
       
       const normalizedCode = code.trim().toUpperCase();
       console.log('🔍 [getStoreByCode] Buscando loja com código:', normalizedCode);
       
+      // Verifica se localStorage está disponível
+      if (typeof Storage === 'undefined' || !localStorage) {
+        console.error('❌ [getStoreByCode] localStorage não disponível');
+        return null;
+      }
+      
       // Primeiro tenta buscar localmente
-      let stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+      let stores: Store[] = [];
+      try {
+        stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+        if (!Array.isArray(stores)) {
+          console.warn('⚠️ [getStoreByCode] stores não é um array, usando array vazio');
+          stores = [];
+        }
+      } catch (storageError) {
+        console.error('❌ [getStoreByCode] Erro ao ler stores do localStorage:', storageError);
+        stores = [];
+      }
+      
       console.log('📦 [getStoreByCode] Total de lojas no banco local:', stores.length);
       console.log('📋 [getStoreByCode] Códigos disponíveis localmente:', stores.map(s => s.code || '(sem código)'));
       
       // Busca case-insensitive e sem espaços
       let found = stores.find(s => {
-        if (!s.code) return false;
-        const storeCode = s.code.trim().toUpperCase();
-        return storeCode === normalizedCode;
+        if (!s || !s.code) return false;
+        try {
+          const storeCode = s.code.trim().toUpperCase();
+          return storeCode === normalizedCode;
+        } catch (e) {
+          console.warn('⚠️ [getStoreByCode] Erro ao processar código da loja:', s.code, e);
+          return false;
+        }
       });
       
       // Se não encontrou e syncFromSheet é true, tenta sincronizar do Sheets
       if (!found && syncFromSheet) {
         try {
           console.log('🔄 [getStoreByCode] Loja não encontrada localmente, sincronizando do Sheets...');
-          await db.syncFromSheetDB();
+          
+          // Sincroniza com timeout para evitar travamento no mobile
+          const syncPromise = db.syncFromSheetDB();
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout na sincronização')), 15000)
+          );
+          
+          await Promise.race([syncPromise, timeoutPromise]);
           
           // Busca novamente após sincronizar
-          stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+          try {
+            stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+            if (!Array.isArray(stores)) {
+              stores = [];
+            }
+          } catch (readError) {
+            console.error('❌ [getStoreByCode] Erro ao ler stores após sincronização:', readError);
+            stores = [];
+          }
+          
           console.log('📦 [getStoreByCode] Total de lojas após sincronização:', stores.length);
           console.log('📋 [getStoreByCode] Códigos disponíveis após sincronização:', stores.map(s => s.code || '(sem código)'));
           
           // Tenta encontrar novamente
           found = stores.find(s => {
-            if (!s.code) return false;
-            const storeCode = s.code.trim().toUpperCase();
-            return storeCode === normalizedCode;
+            if (!s || !s.code) return false;
+            try {
+              const storeCode = s.code.trim().toUpperCase();
+              return storeCode === normalizedCode;
+            } catch (e) {
+              return false;
+            }
           });
           
           if (found) {
@@ -604,11 +691,15 @@ export const db = {
       if (!found) {
         console.log('🔍 [getStoreByCode] Tentando busca alternativa...');
         found = stores.find(s => {
-          if (!s.code) return false;
-          const storeCode = s.code.trim();
-          return storeCode === code.trim() || 
-                 storeCode.toUpperCase() === normalizedCode ||
-                 storeCode.toLowerCase() === code.trim().toLowerCase();
+          if (!s || !s.code) return false;
+          try {
+            const storeCode = s.code.trim();
+            return storeCode === code.trim() || 
+                   storeCode.toUpperCase() === normalizedCode ||
+                   storeCode.toLowerCase() === code.trim().toLowerCase();
+          } catch (e) {
+            return false;
+          }
         });
         
         if (found) {
@@ -622,10 +713,10 @@ export const db = {
       } else {
         console.error('❌ [getStoreByCode] Loja NÃO encontrada com código:', normalizedCode);
         console.error('📋 [getStoreByCode] Todas as lojas disponíveis:', stores.map(s => ({ 
-          id: s.id, 
-          name: s.name, 
-          code: s.code || '(sem código)',
-          codeNormalized: s.code ? s.code.trim().toUpperCase() : '(sem código)'
+          id: s?.id || '(sem id)', 
+          name: s?.name || '(sem nome)', 
+          code: s?.code || '(sem código)',
+          codeNormalized: s?.code ? s.code.trim().toUpperCase() : '(sem código)'
         })));
         return null;
       }
