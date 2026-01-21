@@ -54,9 +54,9 @@ const CustomerLogin: React.FC = () => {
 
       if (customer && customer.password === password.trim()) {
         db.setCurrentCustomer(customer);
-        // Redireciona para a loja do cliente
+        // Redireciona para a loja do cliente (sincroniza do Sheets se necessário)
         if (customer.storeCode) {
-          const store = db.getStoreByCode(customer.storeCode);
+          const store = await db.getStoreByCode(customer.storeCode, true);
           if (store && store.code) {
             navigate(`/loja/${store.code}`);
           } else {

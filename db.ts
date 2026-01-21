@@ -542,26 +542,47 @@ export const db = {
     // NÃO sincroniza automaticamente com SheetDB para evitar duplicatas
     // A sincronização é feita apenas através de saveStoreOwnerRegistration
   },
-  getStoreByCode: (code: string) => {
+  getStoreByCode: async (code: string, syncFromSheet: boolean = true) => {
     try {
       if (!code || !code.trim()) {
         console.warn('⚠️ getStoreByCode: código vazio');
         return null;
       }
       
-      const stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+      let stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
       const normalizedCode = code.trim().toUpperCase();
       
       console.log('🔍 Buscando loja com código:', normalizedCode);
-      console.log('📦 Total de lojas no banco:', stores.length);
+      console.log('📦 Total de lojas no banco local:', stores.length);
       console.log('📋 Códigos disponíveis:', stores.map(s => s.code || '(sem código)'));
       
       // Busca case-insensitive e sem espaços
-      const found = stores.find(s => {
+      let found = stores.find(s => {
         if (!s.code) return false;
         const storeCode = s.code.trim().toUpperCase();
         return storeCode === normalizedCode;
       });
+      
+      // Se não encontrou e syncFromSheet é true, tenta sincronizar do Sheets
+      if (!found && syncFromSheet) {
+        try {
+          console.log('🔄 Loja não encontrada localmente, sincronizando do Sheets...');
+          await db.syncFromSheetDB();
+          // Busca novamente após sincronizar
+          stores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
+          console.log('📦 Total de lojas após sincronização:', stores.length);
+          console.log('📋 Códigos disponíveis após sincronização:', stores.map(s => s.code || '(sem código)'));
+          
+          found = stores.find(s => {
+            if (!s.code) return false;
+            const storeCode = s.code.trim().toUpperCase();
+            return storeCode === normalizedCode;
+          });
+        } catch (syncError) {
+          console.warn('⚠️ Erro ao sincronizar do Sheets:', syncError);
+          // Continua mesmo se falhar a sincronização
+        }
+      }
       
       if (found) {
         console.log('✅ Loja encontrada:', found.id, found.name, 'Código:', found.code);

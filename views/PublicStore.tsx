@@ -37,7 +37,7 @@ const PublicStore: React.FC = () => {
   const [currentCustomer, setCurrentCustomer] = useState<any>(null); // Cliente logado
 
   // Função para carregar a loja
-  const loadStore = React.useCallback(() => {
+  const loadStore = React.useCallback(async () => {
     if (!code) {
       console.warn('⚠️ Código da loja não fornecido');
       setTimeout(() => {
@@ -51,7 +51,8 @@ const PublicStore: React.FC = () => {
       const normalizedCode = code.trim().toUpperCase();
       console.log('🔍 Carregando loja com código:', normalizedCode);
       
-      const found = db.getStoreByCode(normalizedCode);
+      // Busca a loja (sincroniza do Sheets se necessário)
+      const found = await db.getStoreByCode(normalizedCode, true);
       
       if (found && found.id) {
         console.log('✅ Loja carregada com sucesso:', found.name, found.id);
@@ -59,6 +60,10 @@ const PublicStore: React.FC = () => {
         const allProducts = db.getProducts();
         const storeProducts = allProducts.filter(p => p.storeId === found.id && p.isActive);
         console.log('📦 Produtos encontrados:', storeProducts.length);
+        // Log para debug de imagens
+        storeProducts.forEach(p => {
+          console.log(`📷 Produto: ${p.name}, Imagem: ${p.image ? 'Sim (' + (p.image.length > 100 ? 'base64' : 'URL') + ')' : 'Não'}`);
+        });
         setProducts(storeProducts);
         setIsLoading(false);
         setNotFound(false);
@@ -152,9 +157,10 @@ const PublicStore: React.FC = () => {
     window.addEventListener('focus', handleFocus);
 
     // Também escuta mudanças no mesmo contexto (não dispara storage event)
-    const checkInterval = setInterval(() => {
+    const checkInterval = setInterval(async () => {
       try {
-        const currentStore = db.getStoreByCode(code.toUpperCase());
+        // Não sincroniza do Sheets aqui para evitar muitas requisições (apenas verifica local)
+        const currentStore = await db.getStoreByCode(code.toUpperCase(), false);
         if (currentStore && store) {
           // Compara se houve mudanças
           const storeChanged = 
@@ -703,11 +709,30 @@ const PublicStore: React.FC = () => {
                     >
                       {/* Product Image */}
                       <div className="relative h-48 overflow-hidden bg-slate-50">
-                        <img 
-                          src={product.image} 
-                          alt={product.name} 
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
-                        />
+                        {product.image && product.image.trim() ? (
+                          <img 
+                            src={product.image} 
+                            alt={product.name} 
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                            onError={(e) => {
+                              // Se a imagem falhar ao carregar, mostra placeholder
+                              const target = e.target as HTMLImageElement;
+                              target.style.display = 'none';
+                              const placeholder = target.nextElementSibling as HTMLElement;
+                              if (placeholder) placeholder.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        <div 
+                          className={`w-full h-full ${product.image && product.image.trim() ? 'hidden' : 'flex'} items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200`}
+                        >
+                          <div className="text-center p-4">
+                            <div className="w-16 h-16 mx-auto mb-2 bg-slate-300 rounded-xl flex items-center justify-center">
+                              <ShoppingBag size={32} className="text-slate-400" />
+                            </div>
+                            <p className="text-xs text-slate-400 font-bold">Sem imagem</p>
+                          </div>
+                        </div>
                         <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         
                         {/* Add Button Overlay */}
@@ -809,7 +834,22 @@ const PublicStore: React.FC = () => {
                 <div className="space-y-6 sm:space-y-8">
                   {cart.map(item => (
                     <div key={item.product.id} className="flex items-center gap-3 sm:gap-5">
-                      <img src={item.product.image} className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-[20px] object-cover shadow-sm flex-shrink-0" />
+                      {item.product.image && item.product.image.trim() ? (
+                        <img 
+                          src={item.product.image} 
+                          alt={item.product.name}
+                          className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-[20px] object-cover shadow-sm flex-shrink-0" 
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const placeholder = target.nextElementSibling as HTMLElement;
+                            if (placeholder) placeholder.style.display = 'flex';
+                          }}
+                        />
+                      ) : null}
+                      <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl sm:rounded-[20px] bg-slate-200 flex items-center justify-center flex-shrink-0 ${item.product.image && item.product.image.trim() ? 'hidden' : 'flex'}`}>
+                        <ShoppingBag size={20} className="text-slate-400" />
+                      </div>
                       <div className="flex-1 min-w-0">
                         <h4 className="font-extrabold text-slate-800 text-sm sm:text-base truncate">{item.product.name}</h4>
                         <p className="text-orange-500 font-black text-xs sm:text-sm mt-1">

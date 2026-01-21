@@ -138,12 +138,15 @@ const ProductManagement: React.FC = () => {
       if (editingProduct && editingProduct.id) {
         const updated = allProducts.map(p => {
           if (p.id === editingProduct.id) {
-            return {
+            const updatedProduct = {
               ...p,
               ...formData,
               price: parseFloat(formData.price),
-              storeId: store.id
+              storeId: store.id,
+              image: formData.image || p.image || '' // Garante que a imagem seja preservada
             } as Product;
+            console.log('✅ Produto atualizado:', updatedProduct.name, 'Imagem:', updatedProduct.image ? 'Sim' : 'Não');
+            return updatedProduct;
           }
           return p;
         });
@@ -159,6 +162,10 @@ const ProductManagement: React.FC = () => {
           isActive: formData.isActive !== undefined ? formData.isActive : true,
           storeId: store.id
         };
+        console.log('✅ Novo produto criado:', newProduct.name, 'Imagem:', newProduct.image ? 'Sim' : 'Não');
+        if (newProduct.image) {
+          console.log('📷 Tamanho da imagem (primeiros 100 chars):', newProduct.image.substring(0, 100));
+        }
         db.saveProducts([...allProducts, newProduct]);
       }
       

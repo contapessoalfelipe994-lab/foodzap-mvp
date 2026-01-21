@@ -41,8 +41,8 @@ const CustomerRegister: React.FC = () => {
         return;
       }
 
-      // Verifica se o código da loja existe
-      const store = db.getStoreByCode(formData.storeCode.toUpperCase().trim());
+      // Verifica se o código da loja existe (sincroniza do Sheets se necessário)
+      const store = await db.getStoreByCode(formData.storeCode.toUpperCase().trim(), true);
       if (!store || !store.id) {
         setError('Código da loja inválido. Verifique o código que você recebeu.');
         return;
