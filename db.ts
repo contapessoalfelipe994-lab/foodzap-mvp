@@ -193,15 +193,22 @@ const getFromSheetDB = async <T,>(table: string, defaultValue: T): Promise<T> =>
       const parsed = data
         .map((item: any) => {
           try {
+            let parsedData: any;
+            
             // Tenta parsear do campo 'data' ou usa o objeto diretamente
             if (item.data) {
-              const parsedData = JSON.parse(item.data);
-              console.log(`✅ Item parseado (${table}):`, parsedData);
-              return parsedData;
+              parsedData = JSON.parse(item.data);
+            } else {
+              parsedData = item;
             }
-            // Se não tiver campo 'data', tenta usar o item diretamente
-            console.log(`📋 Item sem campo 'data' (${table}):`, item);
-            return item;
+            
+            // Se for uma loja, normaliza o código
+            if (table === 'stores' && parsedData && parsedData.code) {
+              parsedData.code = parsedData.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+            }
+            
+            console.log(`✅ Item parseado (${table}):`, parsedData);
+            return parsedData;
           } catch (parseError) {
             console.warn(`⚠️ Erro ao parsear item (${table}):`, parseError, item);
             return null;
@@ -501,12 +508,34 @@ export const db = {
       if (sheetStores.length > 0) {
         const localStores = getFromStorage<Store[]>(STORAGE_KEYS.STORES, []);
         const localStoreIds = new Set(localStores.map(s => s.id).filter(Boolean));
-        const localStoreCodes = new Set(localStores.map(s => s.code?.toUpperCase().trim()).filter(Boolean));
+        const localStoreCodes = new Set(localStores.map(s => {
+          if (!s.code) return null;
+          return s.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        }).filter(Boolean));
         
-        // Filtra lojas novas (por ID) e também por código (para evitar duplicatas com IDs diferentes)
+        console.log('📋 [syncFromSheetDB] Códigos de lojas locais:', Array.from(localStoreCodes));
+        console.log('📋 [syncFromSheetDB] Lojas do Sheets:', sheetStores.map(s => ({ 
+          name: s.name, 
+          code: s.code, 
+          codeNormalized: s.code ? s.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : null,
+          id: s.id 
+        })));
+        
+        // Normaliza e filtra lojas novas (por ID) e também por código (para evitar duplicatas com IDs diferentes)
         const newStores = sheetStores.filter(s => {
-          const hasId = s.id && !localStoreIds.has(s.id);
-          const hasCode = s.code && !localStoreCodes.has(s.code.toUpperCase().trim());
+          if (!s || !s.id) return false;
+          
+          // Normaliza o código da loja do Sheets
+          const sheetCode = s.code ? s.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : null;
+          
+          const hasId = !localStoreIds.has(s.id);
+          const hasCode = sheetCode && !localStoreCodes.has(sheetCode);
+          
+          // Se tem código, normaliza antes de adicionar
+          if (s.code && sheetCode) {
+            s.code = sheetCode;
+          }
+          
           return hasId || hasCode;
         });
         
@@ -514,9 +543,33 @@ export const db = {
           const mergedStores = [...localStores, ...newStores];
           saveToStorage(STORAGE_KEYS.STORES, mergedStores);
           console.log(`✅ ${newStores.length} loja(s) sincronizada(s) do Sheets`);
-          console.log('📋 Lojas sincronizadas:', newStores.map(s => ({ name: s.name, code: s.code, id: s.id })));
+          console.log('📋 [syncFromSheetDB] Lojas sincronizadas:', newStores.map(s => ({ 
+            name: s.name, 
+            code: s.code, 
+            codeNormalized: s.code ? s.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : null,
+            id: s.id 
+          })));
         } else {
-          console.log('ℹ️ Nenhuma loja nova encontrada no Sheets para sincronizar');
+          console.log('ℹ️ [syncFromSheetDB] Nenhuma loja nova encontrada no Sheets para sincronizar');
+          // Mesmo sem lojas novas, atualiza os códigos das lojas existentes se necessário
+          const updatedStores = localStores.map(localStore => {
+            const sheetStore = sheetStores.find(s => s.id === localStore.id);
+            if (sheetStore && sheetStore.code) {
+              const normalizedCode = sheetStore.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+              if (normalizedCode && localStore.code !== normalizedCode) {
+                console.log(`🔄 [syncFromSheetDB] Atualizando código da loja ${localStore.name}: ${localStore.code} -> ${normalizedCode}`);
+                return { ...localStore, code: normalizedCode };
+              }
+            }
+            return localStore;
+          });
+          
+          // Verifica se houve atualizações
+          const hasUpdates = updatedStores.some((updated, index) => updated.code !== localStores[index]?.code);
+          if (hasUpdates) {
+            saveToStorage(STORAGE_KEYS.STORES, updatedStores);
+            console.log('✅ [syncFromSheetDB] Códigos de lojas atualizados');
+          }
         }
       }
 
@@ -628,11 +681,12 @@ export const db = {
       console.log('📦 [getStoreByCode] Total de lojas no banco local:', stores.length);
       console.log('📋 [getStoreByCode] Códigos disponíveis localmente:', stores.map(s => s.code || '(sem código)'));
       
-      // Busca case-insensitive e sem espaços
+      // Busca case-insensitive e sem espaços, removendo caracteres especiais
       let found = stores.find(s => {
         if (!s || !s.code) return false;
         try {
-          const storeCode = s.code.trim().toUpperCase();
+          // Normaliza o código da loja (remove espaços, caracteres especiais, converte para maiúsculas)
+          const storeCode = s.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
           return storeCode === normalizedCode;
         } catch (e) {
           console.warn('⚠️ [getStoreByCode] Erro ao processar código da loja:', s.code, e);
@@ -671,7 +725,8 @@ export const db = {
           found = stores.find(s => {
             if (!s || !s.code) return false;
             try {
-              const storeCode = s.code.trim().toUpperCase();
+              // Normaliza o código da loja (remove espaços, caracteres especiais, converte para maiúsculas)
+              const storeCode = s.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
               return storeCode === normalizedCode;
             } catch (e) {
               return false;
@@ -687,16 +742,23 @@ export const db = {
         }
       }
       
-      // Se ainda não encontrou, tenta busca alternativa (sem normalização)
+      // Se ainda não encontrou, tenta busca alternativa (múltiplas variações)
       if (!found) {
         console.log('🔍 [getStoreByCode] Tentando busca alternativa...');
         found = stores.find(s => {
           if (!s || !s.code) return false;
           try {
-            const storeCode = s.code.trim();
-            return storeCode === code.trim() || 
-                   storeCode.toUpperCase() === normalizedCode ||
-                   storeCode.toLowerCase() === code.trim().toLowerCase();
+            const storeCode = s.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const codeVariations = [
+              code.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''),
+              code.trim().toUpperCase(),
+              code.trim(),
+              code.trim().toLowerCase()
+            ];
+            return codeVariations.includes(storeCode) || 
+                   storeCode === normalizedCode ||
+                   storeCode.includes(normalizedCode) ||
+                   normalizedCode.includes(storeCode);
           } catch (e) {
             return false;
           }

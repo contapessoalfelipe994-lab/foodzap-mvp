@@ -92,7 +92,7 @@ const Register: React.FC = () => {
         ownerId: userId,
         name: formData.storeName.trim(),
         slug: slug,
-        code: storeCode,
+        code: storeCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''), // Garante normalização do código
         logo: 'https://picsum.photos/200',
         banner: 'https://picsum.photos/800/200',
         description: `Seja bem-vindo à ${formData.storeName.trim()}!`,

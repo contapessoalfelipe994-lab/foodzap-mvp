@@ -428,7 +428,7 @@ const StoreSettings: React.FC = () => {
         appDiscountValue: formData.appDiscountValue !== undefined ? Number(formData.appDiscountValue) : (store.appDiscountValue ?? 0),
         id: store.id,
         ownerId: store.ownerId,
-        code: store.code ? store.code.trim().toUpperCase() : store.code, // Garante que o código está em maiúsculas
+        code: store.code ? store.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : store.code, // Garante que o código está normalizado (maiúsculas, sem espaços, sem caracteres especiais)
         slug: store.slug || (name.toLowerCase().replace(/\s+/g, '-').replace(/[^\w-]/g, '') || 'loja'),
         hours: formData.hours && formData.hours.open && formData.hours.close ? formData.hours : (store.hours || {
           open: '08:00',

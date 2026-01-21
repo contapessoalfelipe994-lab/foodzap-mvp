@@ -41,7 +41,7 @@ const CustomerRegister: React.FC = () => {
         return;
       }
 
-      const normalizedCode = formData.storeCode.toUpperCase().trim();
+      const normalizedCode = formData.storeCode.toUpperCase().trim().replace(/[^A-Z0-9]/g, '');
       console.log('🔍 [CustomerRegister] Validando código da loja:', normalizedCode);
       
       // Primeiro tenta buscar localmente (mais rápido)
@@ -51,24 +51,39 @@ const CustomerRegister: React.FC = () => {
       if (!store || !store.id) {
         try {
           console.log('🔄 [CustomerRegister] Loja não encontrada localmente, sincronizando do Sheets...');
+          setError('Sincronizando dados... Aguarde.');
           
-          // Sincroniza com timeout para evitar travamento no mobile
+          // Sincroniza com timeout maior para mobile (20 segundos)
           const syncPromise = db.syncFromSheetDB();
           const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout na sincronização')), 10000)
+            setTimeout(() => reject(new Error('Timeout na sincronização')), 20000)
           );
           
           await Promise.race([syncPromise, timeoutPromise]);
           console.log('✅ [CustomerRegister] Sincronização concluída');
           
+          // Aguarda um pouco para garantir que os dados foram salvos
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
           // Tenta buscar novamente após sincronizar
           store = await db.getStoreByCode(normalizedCode, false);
+          
+          // Se ainda não encontrou, tenta buscar sem normalização adicional
+          if (!store || !store.id) {
+            console.log('🔍 [CustomerRegister] Tentando busca sem normalização adicional...');
+            store = await db.getStoreByCode(formData.storeCode.trim(), false);
+          }
         } catch (syncError) {
           console.warn('⚠️ [CustomerRegister] Erro ao sincronizar do Sheets:', syncError);
           // Tenta buscar novamente mesmo se a sincronização falhar (pode ter carregado parcialmente)
           if (!store || !store.id) {
             store = await db.getStoreByCode(normalizedCode, false);
+            if (!store || !store.id) {
+              store = await db.getStoreByCode(formData.storeCode.trim(), false);
+            }
           }
+        } finally {
+          setError('');
         }
       }
       
