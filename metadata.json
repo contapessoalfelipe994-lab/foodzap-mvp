@@ -1,0 +1,5 @@
+{
+  "name": "FoodZap MVP",
+  "description": "Uma plataforma completa para pequenos vendedores de comida criarem suas lojas online e receberem pedidos diretamente no WhatsApp, com controle de estoque, horários e frete.",
+  "requestFramePermissions": []
+}
